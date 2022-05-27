@@ -87,7 +87,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	/// Constructor
 	/// </summary>
 	/// <param name="memoryCache">Memory cache</param>
-	/// <param name="fileCache">File cache. Can pass NullFileCache to skip file caching layer.</param>
+	/// <param name="fileCache">File cache. Can pass NullFileCache to skip file caching layer. Recommend to use SSD only for this.</param>
 	/// <param name="distributedCache">Distributed cache</param>
 	/// <param name="logger">Logger</param>
 	public LayeredCache(IMemoryCache memoryCache,
