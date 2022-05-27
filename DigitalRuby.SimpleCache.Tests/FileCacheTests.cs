@@ -34,7 +34,7 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 	public async Task TestFileCache()
 	{
 		const int testCount = 10;
-		const string data = "aowejf poawef jpaowejf paowejf paojefaq23-0 5uq2345u q-3495345W#$ %W#$% W#$%W#$5 w34ihto345hg oih45giw45g1 -f0 uqa-430ru -03q4tu 0q934tq34 T{}43 tpw34ot pw34t0w4395 0w4";
+		const string data = "74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F";
 		using FileCache fileCache = new(this, this, new NullLogger<FileCache>());
 
 		var item = await fileCache.GetAsync<string>("key1");
