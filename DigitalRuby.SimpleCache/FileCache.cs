@@ -1,12 +1,10 @@
-﻿using System;
-
-namespace DigitalRuby.SimpleCache;
+﻿namespace DigitalRuby.SimpleCache;
 
 /// <summary>
 /// File cache item
 /// </summary>
 /// <typeparam name="T">Type of item</typeparam>
-public class FileCacheItem<T>
+public sealed class FileCacheItem<T>
 {
 	/// <summary>
 	/// Constructor
@@ -61,7 +59,7 @@ public interface IDiskSpace
 /// <summary>
 /// Piggy back off the interface that has default implementations
 /// </summary>
-public class DiskSpace : IDiskSpace { }
+public sealed class DiskSpace : IDiskSpace { }
 
 /// <summary>
 /// Cache items using files
@@ -88,7 +86,7 @@ public interface IFileCache
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
 	/// <exception cref="NullReferenceException">Key is null</exception>
-	Task SetAsync<T>(string key, T value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default);
+	Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Remove an item from the cache
@@ -99,17 +97,41 @@ public interface IFileCache
 	/// <returns>Task</returns>
 	/// <exception cref="NullReferenceException">Key is null</exception>
 	/// <remarks>Ensure the the type parameter is the exact type that you used to add the item to the cache</remarks>
-	Task RemoveAsync<T>(string key, CancellationToken cancelToken = default);
+	Task RemoveAsync(string key, CancellationToken cancelToken = default);
+}
+
+/// <summary>
+/// Null file cache that does nothing
+/// </summary>
+public sealed class NullFileCache : IFileCache
+{
+	/// <inheritdoc />
+    public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
+    {
+		return Task.FromResult<FileCacheItem<T>?>(null);
+    }
+
+	/// <inheritdoc />
+	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
+    {
+		return Task.CompletedTask;
+    }
+
+	/// <inheritdoc />
+	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+    {
+		return Task.CompletedTask;
+    }
 }
 
 /// <inheritdoc />
-public class FileCache : BackgroundService, IFileCache
+public sealed class FileCache : BackgroundService, IFileCache
 {
 	private static readonly TimeSpan cleanupLoopDelay = TimeSpan.FromMilliseconds(1.0);
 
 	private readonly KeyLocker keyLocker = new(512);
+	private readonly ISerializer serializer = JsonLZ4Serializer.Instance;
 
-	private readonly ISerializer serializer;
 	private readonly IDiskSpace diskSpace;
 	private readonly IDateTimeProvider dateTimeProvider;
 
@@ -146,16 +168,13 @@ public class FileCache : BackgroundService, IFileCache
 	/// <summary>
 	/// Constructor
 	/// </summary>
-	/// <param name="serializer">Serializer</param>
 	/// <param name="diskSpace">Disk space</param>
 	/// <param name="dateTimeProvider">Date time provider</param>
 	/// <param name="logger">Logger</param>
-	public FileCache(ISerializer serializer,
-		IDiskSpace diskSpace,
+	public FileCache(IDiskSpace diskSpace,
 		IDateTimeProvider dateTimeProvider,
 		ILogger<FileCache> logger)
 	{
-		this.serializer = serializer;
 		this.diskSpace = diskSpace;
 		this.dateTimeProvider = dateTimeProvider;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
@@ -193,7 +212,7 @@ public class FileCache : BackgroundService, IFileCache
 			using FileStream readerStream = new(fileName, FileMode.Open, FileAccess.Read, FileShare.None);
 			using BinaryReader reader = new(readerStream);
 			long ticks = reader.ReadInt64();
-			DateTime cutOff = new(ticks, DateTimeKind.Utc);
+			DateTimeOffset cutOff = new(ticks, TimeSpan.Zero);
 			if (dateTimeProvider.UtcNow >= cutOff)
 			{
 				// expired, delete, no exception for performance
@@ -236,7 +255,7 @@ public class FileCache : BackgroundService, IFileCache
 	}
 
 	/// <inheritdoc />
-	public Task RemoveAsync<T>(string key, CancellationToken cancelToken = default)
+	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
@@ -258,7 +277,7 @@ public class FileCache : BackgroundService, IFileCache
 	}
 
 	/// <inheritdoc />
-	public async Task SetAsync<T>(string key, T value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+	public async Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 

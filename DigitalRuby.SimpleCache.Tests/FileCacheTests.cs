@@ -35,12 +35,12 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 	{
 		const int testCount = 10;
 		const string data = "aowejf poawef jpaowejf paowejf paojefaq23-0 5uq2345u q-3495345W#$ %W#$% W#$%W#$5 w34ihto345hg oih45giw45g1 -f0 uqa-430ru -03q4tu 0q934tq34 T{}43 tpw34ot pw34t0w4395 0w4";
-		using FileCache fileCache = new(JsonLZ4Serializer.Instance, this, this, new NullLogger<FileCache>());
+		using FileCache fileCache = new(this, this, new NullLogger<FileCache>());
 
 		var item = await fileCache.GetAsync<string>("key1");
 		Assert.That(item, Is.Null);
 
-		await fileCache.SetAsync<string>("key1", data, new CacheParameters(TimeSpan.FromSeconds(5.0)));
+		await fileCache.SetAsync("key1", data, new CacheParameters(TimeSpan.FromSeconds(5.0)));
 		item = await fileCache.GetAsync<string>("key1");
 		Assert.That(item, Is.Not.Null);
 		Assert.That(item.Item, Is.EqualTo(data));
@@ -52,10 +52,10 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 		Assert.That(item, Is.Null);
 
 		// put item back
-		await fileCache.SetAsync<string>("key1", data, new CacheParameters(TimeSpan.FromSeconds(5.0)));
+		await fileCache.SetAsync("key1", data, new CacheParameters(TimeSpan.FromSeconds(5.0)));
 
 		// remove it
-		await fileCache.RemoveAsync<string>("key1");
+		await fileCache.RemoveAsync("key1");
 
 		// should be gone
 		Assert.That(item, Is.Null);
@@ -67,7 +67,7 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 		for (int i = 0; i < testCount; i++)
 		{
 			int iCopy = i;
-			tasks.Add(fileCache.SetAsync<string>("key_" + iCopy, "key_" + iCopy + "_" + data, new CacheParameters(TimeSpan.FromSeconds(5.0))));
+			tasks.Add(fileCache.SetAsync("key_" + iCopy, "key_" + iCopy + "_" + data, new CacheParameters(TimeSpan.FromSeconds(5.0))));
 		}
 		await Task.WhenAll(tasks);
 		tasks.Clear();
@@ -114,7 +114,7 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 		for (int i = 0; i < testCount; i++)
 		{
 			int iCopy = i;
-			tasks.Add(fileCache.SetAsync<string>("key_" + iCopy, "key_" + iCopy, new CacheParameters(TimeSpan.FromSeconds(5.0))));
+			tasks.Add(fileCache.SetAsync("key_" + iCopy, "key_" + iCopy, new CacheParameters(TimeSpan.FromSeconds(5.0))));
 		}
 		await Task.WhenAll(tasks);
 		tasks.Clear();

@@ -3,7 +3,7 @@
 /// <summary>
 /// Allows locking on keys in a more thread friendly manner than just lock
 /// </summary>
-public sealed class KeyLocker
+internal sealed class KeyLocker
 {
 	private readonly int[] keyLocks;
 

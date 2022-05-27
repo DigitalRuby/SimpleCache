@@ -1,11 +1,9 @@
 ﻿namespace DigitalRuby.SimpleCache;
 
-using K4os.Compression.LZ4.Streams;
-
 /// <summary>
 /// Interface for serializing cache objects to/from bytes
 /// </summary>
-public interface ISerializer
+internal interface ISerializer
 {
     /// <summary>
     /// Deserialize
@@ -31,7 +29,7 @@ public interface ISerializer
 /// <summary>
 /// Compressed json serializer using lz4
 /// </summary>
-public class JsonLZ4Serializer : ISerializer
+internal sealed class JsonLZ4Serializer : ISerializer
 {
     /// <summary>
     /// Deserialize an object from compressed json bytes
