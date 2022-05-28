@@ -51,7 +51,7 @@ public interface IDiskSpace
 }
 
 /// <summary>
-/// Piggy back off the interface that has default implementations
+/// Determine free and total disk space for a given path
 /// </summary>
 public sealed class DiskSpace : IDiskSpace
 {
@@ -151,6 +151,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 
 	private readonly IDiskSpace diskSpace;
 	private readonly IDateTimeProvider dateTimeProvider;
+	private readonly ILogger logger;
 
 	private readonly string baseDir;
 
@@ -202,16 +203,17 @@ public sealed class FileCache : BackgroundService, IFileCache
 		Serializer = serializer;
 		this.diskSpace = diskSpace;
 		this.dateTimeProvider = dateTimeProvider;
+		this.logger = logger;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
 		baseDir = Path.Combine(Path.GetTempPath(), assemblyName, nameof(FileCache));
 		Directory.CreateDirectory(baseDir);
 		double freePercent = diskSpace.GetPercentFreeSpace(baseDir, out long availableFreeSpace, out long totalSpace);
-		logger.LogWarning("Disk space free: {freePercent:0.00}% ({availableFreeSpace}/{totalFreeSpace})",
+		this.logger.LogWarning("Disk space free: {freePercent:0.00}% ({availableFreeSpace}/{totalFreeSpace})",
 			freePercent * 100.0, availableFreeSpace, totalSpace);
 	}
 
 	/// <inheritdoc />
-	public async Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
+	public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
@@ -222,7 +224,8 @@ public sealed class FileCache : BackgroundService, IFileCache
 		{
 			if (!File.Exists(fileName))
 			{
-				return null;
+				logger.LogDebug("File cache miss {key}, {fileName}", key, fileName);
+				return Task.FromResult<FileCacheItem<T>?>(default);
 			}
 			using FileStream readerStream = new(fileName, FileMode.Open, FileAccess.Read, FileShare.None);
 			using BinaryReader reader = new(readerStream);
@@ -231,17 +234,24 @@ public sealed class FileCache : BackgroundService, IFileCache
 			if (dateTimeProvider.UtcNow >= cutOff)
 			{
 				// expired, delete, no exception for performance
+				logger.LogDebug("File cache expired {key}, {fileName}, deleting", key, fileName);
 				reader.Close();
-				File.Delete(fileName);
-				return null;
+				try
+				{
+					File.Delete(fileName);
+				}
+				catch (Exception ex)
+				{
+					logger.LogError(ex, "Error removing expired file cache {key}, {fileName}", key, fileName);
+				}
+				return Task.FromResult<FileCacheItem<T>?>(default);
 			}
 			else
 			{
 				// read item from file
 				int size = reader.ReadInt32();
-				byte[] bytes = new byte[size];
-				int bytesRead = await readerStream.ReadAsync(bytes, cancelToken);
-				if (bytesRead != size)
+				byte[] bytes = reader.ReadBytes(size);
+				if (bytes.Length != size)
 				{
 					throw new IOException("Byte counts are off for file cache item");
 				}
@@ -250,22 +260,25 @@ public sealed class FileCache : BackgroundService, IFileCache
 				{
 					throw new IOException("Corrupt cache file " + fileName);
 				}
-				return new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item);
+				var result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item);
+				logger.LogDebug("File cache hit {key}, {fileName}", key, fileName);
+				return Task.FromResult<FileCacheItem<T>?>(result);
 			}
 		}
-		catch
+		catch (Exception ex)
 		{
 			// ignore, just pretend item not exists
 			try
 			{
 				// clear out file
+				logger.LogError(ex, "Error reading cache file {fileName}, deleting file", fileName);
 				File.Delete(fileName);
 			}
-			catch
+			catch (Exception ex2)
 			{
-				// ignore
+				logger.LogError(ex2, "Error removing corrupted cache file {fileName}", fileName);
 			}
-			return null;
+			return Task.FromResult<FileCacheItem<T>?>(default);
 		}
 	}
 
@@ -282,17 +295,22 @@ public sealed class FileCache : BackgroundService, IFileCache
 			if (File.Exists(fileName))
 			{
 				File.Delete(fileName);
+				logger.LogDebug("File cache removed {key}, {fileName}", key, fileName);
+			}
+			else
+			{
+				logger.LogDebug("File cache remove ignored for non existing {key}, {fileName}", key, fileName);
 			}
 		}
-		catch
+		catch (Exception ex)
 		{
-			// ignore
+			logger.LogError(ex, "Error removing existing cache file {key}, {fileName}", key, fileName);
 		}
 		return Task.CompletedTask;
 	}
 
 	/// <inheritdoc />
-	public async Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
@@ -309,13 +327,15 @@ public sealed class FileCache : BackgroundService, IFileCache
 			if (bytes is not null)
 			{
 				writer.Write(bytes.Length);
-				await writerStream.WriteAsync(bytes, cancelToken);
+				writer.Write(bytes);
 			}
+			logger.LogDebug("File cache set {key}, {fileName}", key, fileName);
 		}
-		catch
+		catch (Exception ex)
 		{
-			// ignore
+			logger.LogError(ex, "Error setting cache file {key}, {fileName}", key, fileName);
 		}
+		return Task.CompletedTask;
 	}
 
 	/// <summary>
@@ -351,9 +371,9 @@ public sealed class FileCache : BackgroundService, IFileCache
 						break;
 					}
 				}
-				catch
+				catch (Exception ex)
 				{
-					// ignore
+					logger.LogError(ex, "Error cleaning up cache file {{fileName}", fileName);
 				}
 
 				// don't gobble up too much cpu

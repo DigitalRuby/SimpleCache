@@ -133,8 +133,10 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		var memoryResult = memoryCache.Get<T>(key);
 		if (memoryResult is not null)
 		{
+			logger.LogDebug("Memory cache hit for {key}", key);
 			return memoryResult;
 		}
+		logger.LogDebug("Memory cache miss for {key}", key);
 
 		// L2 lookup (file)
 		var fileResult = await fileCache.GetAsync<T>(key, cancelToken);
@@ -181,6 +183,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 		// L1 cache (RAM)
 		memoryCache.Set(key, obj, cacheTime);
+		logger.LogDebug("Memory cache set {key}", key);
 
 		// L2 cache (file)
 		await fileCache.SetAsync(key, distributedCacheBytes, cacheTime, cancelToken);
@@ -208,6 +211,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 		// L1 cache (RAM)
 		memoryCache.Remove(key);
+		logger.LogDebug("Memory cache deleted {key}", key);
 
 		// L2 cache (file)
 		await fileCache.RemoveAsync(key, cancelToken);
@@ -244,11 +248,11 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	{
 		// get the cache key
 		string key = context.OperationKey;
-		logger.LogDebug("Get or create {key}", key);
+		logger.LogDebug("Layered cache get or create {key}", key);
 
 		return memoryCache.GetOrCreateAsync<T>(key, async entry =>
 		{
-			logger.LogDebug("Get or create {key} not in memory cache", key);
+			logger.LogDebug("Memory cache get or create miss {key}", key);
 
 			if (!context.TryGetValue("CacheTime", out object? value) ||
 				value is not TimeSpan cacheTime)
@@ -280,10 +284,6 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 						throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
 					}
 					return result;
-				}
-				else
-				{
-					logger.LogDebug("Get or create {key} not in distributed cache", key);
 				}
 			}
 			catch (Exception ex)
@@ -324,7 +324,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 	private void DistributedCacheKeyChanged(string key)
 	{
-		logger.LogDebug("Distributed cache key changed: {key}", key);
+		logger.LogDebug("Distributed cache key changed: {key}, removing from memory and file cache", key);
 		memoryCache.Remove(key);
 		fileCache.RemoveAsync(key).GetAwaiter().GetResult();
 	}

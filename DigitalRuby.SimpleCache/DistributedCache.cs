@@ -158,6 +158,7 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		{
 			await connectionMultiplexer.GetDatabase().KeyDeleteAsync(key);
 			await connectionMultiplexer.GetSubscriber().PublishAsync("key.changed", Environment.MachineName + "\t" + key);
+			logger.LogDebug("Redis cache deleted {key}", key);
 			return true;
 		});
 	}
@@ -170,8 +171,10 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 			var item = await connectionMultiplexer.GetDatabase().StringGetWithExpiryAsync(key);
 			if (item.Value.HasValue)
 			{
+				logger.LogDebug("Redis cache hit {key}", key);
 				return new DistributedCacheItem { Bytes = item.Value, Expiry = item.Expiry };
 			}
+			logger.LogDebug("Redis cache miss {key}", key);
 			return default;
 		});
 	}
@@ -188,6 +191,7 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		{
 			await connectionMultiplexer.GetDatabase().StringSetAsync(key, item.Bytes, expiry: item.Expiry);
 			await connectionMultiplexer.GetSubscriber().PublishAsync("key.changed", Environment.MachineName + "\t" + key);
+			logger.LogDebug("Redis cache set {key}", key);
 			return true;
 		});
 	}
@@ -238,9 +242,11 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 			queue = connectionMultiplexer.GetSubscriber().Subscribe("key.changed");
 			queue.OnMessage(msg =>
 			{
-				string[] pieces = msg.Message.ToString().Split('\t');
+				string message = msg.Message.ToString();
+				string[] pieces = message.Split('\t');
 				if (pieces.Length == 2 && (PublishKeyChangedEventsBackToThisMachine || pieces[0] != Environment.MachineName))
 				{
+					logger.LogDebug("Redis cache key change {message}", message);
 					KeyChanged?.Invoke(msg.Message);
 				}
 			});
@@ -285,6 +291,7 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		{
 			if (await db.LockTakeAsync(lockKey, lockToken, lockTime))
 			{
+				logger.LogDebug("Acquired redis cache distributed lock {lockKey}", lockKey);
 				return new DistributedLock(connectionMultiplexer, lockKey, lockToken);
 			}
 			if (timeout > distributedLockSleepTime)

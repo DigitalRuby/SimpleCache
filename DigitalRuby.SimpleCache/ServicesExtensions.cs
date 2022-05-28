@@ -31,12 +31,17 @@ public static class ServicesExtensions
     /// You can put ILayeredCache in your constructors to access cache functionality.<br/>
     /// This will setup your IConnectionMultiplexer for you.<br/>
     /// </summary>
-    /// <param name="services"></param>
+    /// <param name="services">Services</param>
     /// <param name="configuration">Configuration</param>
     public static void AddSimpleCache(this IServiceCollection services, IConfiguration configuration)
     {
         SimpleCacheConfiguration configurationObj = new();
-        configuration.Bind($"{nameof(DigitalRuby)}.{nameof(SimpleCache)}", configurationObj);
+        var configPath = $"{nameof(DigitalRuby)}.{nameof(SimpleCache)}";
+        if (configuration.GetSection(configPath) is null)
+        {
+            throw new InvalidOperationException("You must add your config to config path " + configPath);
+        }
+        configuration.Bind(configPath, configurationObj);
         services.AddSimpleCache(configurationObj);
     }
 
@@ -45,7 +50,7 @@ public static class ServicesExtensions
     /// You can put ILayeredCache in your constructors to access cache functionality.<br/>
     /// This will setup your IConnectionMultiplexer and IMemoryCache for you.<br/>
     /// </summary>
-    /// <param name="services"></param>
+    /// <param name="services">Services</param>
     /// <param name="configuration">Configuration</param>
     public static void AddSimpleCache(this IServiceCollection services, SimpleCacheConfiguration configuration)
     {
@@ -82,7 +87,8 @@ public static class ServicesExtensions
         services.AddSingleton<IDateTimeProvider>(new DateTimeProvider());
         services.AddSingleton<IFileCache>(provider => configuration.UseFileCache
             ? new FileCache(provider.GetRequiredService<ISerializer>(),
-            new DiskSpace(), provider.GetRequiredService<IDateTimeProvider>(),
+            new DiskSpace(),
+            provider.GetRequiredService<IDateTimeProvider>(),
             provider.GetRequiredService<ILogger<FileCache>>())
             : new NullFileCache());
         services.AddSingleton<IDistributedCache, DistributedRedisCache>();
