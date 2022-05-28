@@ -81,7 +81,7 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
         }
     }
 
-    private readonly ConcurrentDictionary<string, DistributedCacheItem> items = new();
+    private readonly ConcurrentDictionary<string, (DateTimeOffset, byte[])> items = new();
 
 	/// <inheritdoc />
     public bool PublishKeyChangedEventsBackToThisMachine { get; set; }
@@ -102,9 +102,9 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 	/// <inheritdoc />
 	public Task<DistributedCacheItem> GetAsync(string key, CancellationToken cancelToken = default)
     {
-		if (items.TryGetValue(key, out var item))
+		if (items.TryGetValue(key, out var item) && item.Item1 > clock.UtcNow)
 		{
-			return Task.FromResult(item);
+			return Task.FromResult(new DistributedCacheItem { Bytes = item.Item2, Expiry = item.Item1 - clock.UtcNow });
 		}
 		return Task.FromResult<DistributedCacheItem>(default);
     }
@@ -112,16 +112,19 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 	/// <inheritdoc />
 	public Task SetAsync(string key, DistributedCacheItem item, CancellationToken cancelToken = default)
     {
-		items[key] = item;
+		if (item.Bytes is not null)
+		{
+			DateTimeOffset expire = clock.UtcNow + item.Expiry ?? throw new ArgumentException("Null expiry not allowed");
+			items[key] = new(expire, item.Bytes);
+		}
 		return Task.CompletedTask;
     }
 
 	/// <inheritdoc />
 	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default)
     {
-		if (!items.TryGetValue(key, out _))
+		if (items.TryAdd(key, new()))
 		{
-			items[key] = new();
 			return Task.FromResult<IAsyncDisposable?>(new FakeDistributedLock());
 		}
 		return Task.FromResult<IAsyncDisposable?>(null);

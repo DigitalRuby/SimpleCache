@@ -147,20 +147,29 @@ public sealed class NullFileCache : IFileCache
 /// </summary>
 public sealed class MemoryFileCache : IFileCache
 {
+	private readonly ISerializer serializer;
 	private readonly ISystemClock clock;
-	private readonly ConcurrentDictionary<string, FileCacheItem<object>> items = new();
+	private readonly ConcurrentDictionary<string, FileCacheItem<byte[]>> items = new();
 
-	public MemoryFileCache(ISystemClock clock) => this.clock = clock;
+	public MemoryFileCache(ISerializer serializer, ISystemClock clock)
+	{
+		this.serializer = serializer;
+		this.clock = clock;
+	}
 
 	/// <inheritdoc />
-	public ISerializer Serializer => new JsonLZ4Serializer();
+	public ISerializer Serializer => serializer;
 
 	/// <inheritdoc />
 	public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
     {
-		if (items.TryGetValue(key, out var item))
+		if (items.TryGetValue(key, out var item) && item.Expires > clock.UtcNow)
 		{
-			T value = (T)item.Item;
+			var value = serializer.Deserialize<T?>(item.Item);
+			if (value is null)
+			{
+				return Task.FromResult<FileCacheItem<T>?>(null);
+			}
 			return Task.FromResult<FileCacheItem<T>?>(new FileCacheItem<T>(item.Expires, value));
 		}
 		return Task.FromResult<FileCacheItem<T>?>(null);
@@ -176,7 +185,8 @@ public sealed class MemoryFileCache : IFileCache
 	/// <inheritdoc />
 	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
     {
-		items[key] = new FileCacheItem<object>(clock.UtcNow + cacheParameters.Duration, value);
+		var bytes = (value is byte[] alreadyBytes ? alreadyBytes : serializer.Serialize(value) ?? throw new IOException("Serialize failed for key " + key));
+		items[key] = new FileCacheItem<byte[]>(clock.UtcNow + cacheParameters.Duration, bytes);
 		return Task.CompletedTask;
     }
 }

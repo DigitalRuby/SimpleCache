@@ -174,7 +174,7 @@ Using multiple layers allows ever increasing amounts of data to be stored at sli
 
 The first layer (L1), the memory cache portion of simple cache uses IMemoryCache. This will be registered for you automatically in the services collection.
 
-A background memory compaction task runs to ensure you don't overrun memory.
+.NET will compact the memory cache based on your settings from the configuration.
 
 ### File cache
 
@@ -194,7 +194,7 @@ The redis layer detects when there is a failover and failback in a cluster and h
 
 As a bonus, a distributed lock factory is provided to acquire locks that need to be synchronized accross machines.
 
-You can inject this interface into your constructors:
+You can inject this interface into your constructors for distributed locking:
 
 ```cs
 /// <summary>
