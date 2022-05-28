@@ -73,7 +73,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 {
 	private static readonly TimeSpan defaultCacheTime = TimeSpan.FromMinutes(5.0);
 
-	private readonly ISerializer serializer = new JsonLZ4Serializer(); //hardcoded for now, we can do fancy type & serializer specification stuff later.
+	private readonly ISerializer serializer;
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
 	private readonly IDistributedCache distributedCache;
@@ -86,15 +86,18 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="serializer">Serializer. This must be the same serializer that was used to create the file cache.</param>
 	/// <param name="memoryCache">Memory cache</param>
 	/// <param name="fileCache">File cache. Can pass NullFileCache to skip file caching layer. Recommend to use SSD only for this.</param>
 	/// <param name="distributedCache">Distributed cache</param>
 	/// <param name="logger">Logger</param>
-	public LayeredCache(IMemoryCache memoryCache,
+	public LayeredCache(ISerializer serializer,
+		IMemoryCache memoryCache,
 		IFileCache fileCache,
 		IDistributedCache distributedCache,
 		ILogger<LayeredCache> logger)
 	{
+		this.serializer = serializer;
 		this.memoryCache = memoryCache;
 		this.fileCache = fileCache;
 		this.distributedCache = distributedCache;
@@ -126,21 +129,21 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 		key = FormatKey<T>(key);
 
-		// L1 lookup
+		// L1 lookup (RAM)
 		var memoryResult = memoryCache.Get<T>(key);
 		if (memoryResult is not null)
 		{
 			return memoryResult;
 		}
 
-		// L2 lookup
+		// L2 lookup (file)
 		var fileResult = await fileCache.GetAsync<T>(key, cancelToken);
 		if (fileResult is not null)
 		{
 			return fileResult.Item;
 		}
 
-		// L3 lookup
+		// L3 lookup (redis)
 		DistributedCacheItem distributedCacheItem = default;
 		try
 		{
@@ -174,15 +177,15 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		}
 
 		key = FormatKey<T>(key);
+		var distributedCacheBytes = SerializeObject(obj);
 
-		// L1 cache
+		// L1 cache (RAM)
 		memoryCache.Set(key, obj, cacheTime);
 
-		// L2 cache
-		await fileCache.SetAsync(key, obj, cacheTime, cancelToken);
+		// L2 cache (file)
+		await fileCache.SetAsync(key, distributedCacheBytes, cacheTime, cancelToken);
 
-		// L3 cache
-		var distributedCacheBytes = SerializeObject(obj);
+		// L3 cache (redis)
 		try
 		{
 			await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.SetAsync(key, new DistributedCacheItem { Bytes = distributedCacheBytes, Expiry = cacheTime }));
@@ -203,13 +206,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 		key = FormatKey<T>(key);
 
-		// L1 cache
+		// L1 cache (RAM)
 		memoryCache.Remove(key);
 
-		// L2 cache
+		// L2 cache (file)
 		await fileCache.RemoveAsync(key, cancelToken);
 
-		// L3 cache
+		// L3 cache (redis)
 		// note- unlike SetAsync, we don't catch the exception here, a deletion that fails in distributed cache is bad and we need it to propagate all the way out
 		await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.DeleteAsync(key, cancelToken));
 	}
@@ -293,21 +296,23 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 			// get the item from the factory
 			var item = await factory(context, cancellationToken);
-
-			// add to distributed cache
 			var distributedCacheBytes = SerializeObject(item);
-			if (distributedCacheBytes is null)
-			{
-				throw new IOException("Failed to serialize object of type " + typeof(T).FullName);
-			}
 
+			// L2 cache (file)
+			// file cache can take raw bytes and will not additional serialization on them
+			await fileCache.SetAsync(key, distributedCacheBytes, cacheTime);
+
+			// L3 cache (redis)
 			try
 			{
-				await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.SetAsync(key, new DistributedCacheItem { Bytes = distributedCacheBytes, Expiry = cacheTime }));
+				await distributedCacheCircuitBreakPolicy.ExecuteAsync(async () =>
+				{
+					await distributedCache.SetAsync(key, new DistributedCacheItem { Bytes = distributedCacheBytes, Expiry = cacheTime });
+				});
 			}
 			catch (Exception ex)
 			{
-				// don't fail the call, we can stomach redis being down
+				// don't fail the call, we can stomach file or redis cache being down
 				var method = nameof(GetOrCreateAsync);
 				var type = typeof(T).FullName ?? string.Empty;
 				logger.LogError(ex, "Distributed cache write error on {method}, {key}, {type}", method, key, type);
@@ -336,9 +341,9 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		return (T?)serializer.Deserialize(bytes, typeof(T?));
 	}
 
-	private byte[]? SerializeObject(object? obj)
+	private byte[] SerializeObject(object obj)
 	{
-		return serializer.Serialize(obj);
+		return serializer.Serialize(obj) ?? throw new IOException("Failed to serialize object of type " + obj.GetType().FullName); ;
 	}
 
 	private string FormatKey<T>(string key)

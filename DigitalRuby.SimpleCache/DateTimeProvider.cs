@@ -8,7 +8,7 @@ public interface IDateTimeProvider
 	/// <summary>
 	/// Current date/time
 	/// </summary>
-	DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+	DateTimeOffset UtcNow { get; }
 
 	/// <summary>
 	/// Delay for a set amount of time
@@ -16,5 +16,20 @@ public interface IDateTimeProvider
 	/// <param name="interval">Interval to delay</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
-	Task DelayAsync(TimeSpan interval, CancellationToken cancelToken = default) => Task.Delay(interval, cancelToken);
+	Task DelayAsync(TimeSpan interval, CancellationToken cancelToken = default);
+}
+
+/// <summary>
+/// Piggy back on IDateTimeProvider interface
+/// </summary>
+public sealed class DateTimeProvider : IDateTimeProvider
+{
+	/// <inheritdoc />
+	public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+
+	/// <inheritdoc />
+	public Task DelayAsync(TimeSpan interval, CancellationToken cancelToken = default)
+    {
+		return Task.Delay(interval, cancelToken);
+    }
 }

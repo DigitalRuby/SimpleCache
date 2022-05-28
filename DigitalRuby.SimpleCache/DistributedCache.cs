@@ -143,6 +143,12 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 	{
 		this.connectionMultiplexer = connectionMultiplexer;
 		this.logger = logger;
+
+		// if we get a connection multiplexer that hasn't connected properly, log an error
+		if (!connectionMultiplexer.IsConnected)
+		{
+			logger.LogError("Connection multiplexer has failed to connect");
+		}
 	}
 
 	/// <inheritdoc />

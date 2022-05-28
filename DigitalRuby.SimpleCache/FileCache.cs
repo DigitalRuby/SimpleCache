@@ -11,7 +11,7 @@ public sealed class FileCacheItem<T>
 	/// </summary>
 	/// <param name="expires">Expires</param>
 	/// <param name="item">Item</param>
-	public FileCacheItem(DateTime expires, T item)
+	public FileCacheItem(DateTimeOffset expires, T item)
 	{
 		Expires = expires;
 		Item = item;
@@ -20,7 +20,7 @@ public sealed class FileCacheItem<T>
 	/// <summary>
 	/// Expiration
 	/// </summary>
-	public DateTime Expires { get; }
+	public DateTimeOffset Expires { get; }
 
 	/// <summary>
 	/// Item
@@ -40,7 +40,23 @@ public interface IDiskSpace
 	/// <param name="availableFreeSpace">Available free space</param>
 	/// <param name="totalSpace">Total space</param>
 	/// <returns>Free space for drive path is on</returns>
-	double GetPercentFreeSpace(string path, out long availableFreeSpace, out long totalSpace)
+	double GetPercentFreeSpace(string path, out long availableFreeSpace, out long totalSpace);
+
+	/// <summary>
+	/// Get size of a file
+	/// </summary>
+	/// <param name="fileName">File name</param>
+	/// <returns>Size</returns>
+	long GetFileSize(string fileName);
+}
+
+/// <summary>
+/// Piggy back off the interface that has default implementations
+/// </summary>
+public sealed class DiskSpace : IDiskSpace
+{
+	/// <inheritdoc />
+	public double GetPercentFreeSpace(string path, out long availableFreeSpace, out long totalSpace)
 	{
 		var info = new DriveInfo(path);
 		availableFreeSpace = info.AvailableFreeSpace;
@@ -48,24 +64,20 @@ public interface IDiskSpace
 		return ((double)availableFreeSpace / (double)totalSpace);
 	}
 
-	/// <summary>
-	/// Get size of a file
-	/// </summary>
-	/// <param name="fileName">File name</param>
-	/// <returns>Size</returns>
-	long GetFileSize(string fileName) => new FileInfo(fileName).Length;
+	/// <inheritdoc />
+	public long GetFileSize(string fileName) => new FileInfo(fileName).Length;
 }
-
-/// <summary>
-/// Piggy back off the interface that has default implementations
-/// </summary>
-public sealed class DiskSpace : IDiskSpace { }
 
 /// <summary>
 /// Cache items using files
 /// </summary>
 public interface IFileCache
 {
+	/// <summary>
+	/// The serializer used to convert objects to bytes
+	/// </summary>
+	public ISerializer Serializer { get; }
+
 	/// <summary>
 	/// Get a cache value
 	/// </summary>
@@ -81,7 +93,8 @@ public interface IFileCache
 	/// </summary>
 	/// <typeparam name="T">Type of object to set</typeparam>
 	/// <param name="key">Key</param>
-	/// <param name="value">Value</param>
+	/// <param name="value">Value. If the value is a byte array, it will not be serialized but will instead
+	/// be assumed to have already been serialized.</param>
 	/// <param name="cacheParameters">Cache parameters or null for default</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
@@ -105,6 +118,11 @@ public interface IFileCache
 /// </summary>
 public sealed class NullFileCache : IFileCache
 {
+	/// <summary>
+	/// Serializer
+	/// </summary>
+	public ISerializer Serializer { get; } = new JsonLZ4Serializer();
+
 	/// <inheritdoc />
     public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
     {
@@ -129,8 +147,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 {
 	private static readonly TimeSpan cleanupLoopDelay = TimeSpan.FromMilliseconds(1.0);
 
-	private readonly KeyLocker keyLocker = new(512);
-	private readonly ISerializer serializer = JsonLZ4Serializer.Instance;
+	private readonly MultithreadedKeyLocker keyLocker = new(512);
 
 	private readonly IDiskSpace diskSpace;
 	private readonly IDateTimeProvider dateTimeProvider;
@@ -141,6 +158,11 @@ public sealed class FileCache : BackgroundService, IFileCache
 	/// Threshold of free space to purge all files
 	/// </summary>
 	public double FreeSpaceThreshold { get; set; } = 0.2;
+
+	/// <summary>
+	/// Serializer
+	/// </summary>
+	public ISerializer Serializer { get; }
 
 	/// <summary>
 	/// Converts a byte array to a string of hexadecimals.
@@ -168,27 +190,20 @@ public sealed class FileCache : BackgroundService, IFileCache
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="serializer">Serializer</param>
 	/// <param name="diskSpace">Disk space</param>
 	/// <param name="dateTimeProvider">Date time provider</param>
 	/// <param name="logger">Logger</param>
-	public FileCache(IDiskSpace diskSpace,
+	public FileCache(ISerializer serializer,
+		IDiskSpace diskSpace,
 		IDateTimeProvider dateTimeProvider,
 		ILogger<FileCache> logger)
 	{
+		Serializer = serializer;
 		this.diskSpace = diskSpace;
 		this.dateTimeProvider = dateTimeProvider;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
 		baseDir = Path.Combine(Path.GetTempPath(), assemblyName, nameof(FileCache));
-		if (Directory.Exists(baseDir))
-		{
-			try
-			{
-				Directory.Delete(baseDir, true);
-			}
-			catch
-			{
-			}
-		}
 		Directory.CreateDirectory(baseDir);
 		double freePercent = diskSpace.GetPercentFreeSpace(baseDir, out long availableFreeSpace, out long totalSpace);
 		logger.LogWarning("Disk space free: {freePercent:0.00}% ({availableFreeSpace}/{totalFreeSpace})",
@@ -201,7 +216,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
 		string fileName = GetHashFileName(key);
-		using var keyLock = keyLocker.AcquireSpinLock(fileName);
+		using var keyLock = keyLocker.Lock(fileName);
 
 		try
 		{
@@ -230,12 +245,12 @@ public sealed class FileCache : BackgroundService, IFileCache
 				{
 					throw new IOException("Byte counts are off for file cache item");
 				}
-				var item = (T?)serializer.Deserialize(bytes, typeof(T?));
+				var item = (T?)Serializer.Deserialize(bytes, typeof(T?));
 				if (item is null)
 				{
 					throw new IOException("Corrupt cache file " + fileName);
 				}
-				return new FileCacheItem<T>(new DateTime(ticks, DateTimeKind.Utc), item);
+				return new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item);
 			}
 		}
 		catch
@@ -260,7 +275,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
 		string fileName = GetHashFileName(key);
-		using var keyLock = keyLocker.AcquireSpinLock(fileName);
+		using var keyLock = keyLocker.Lock(fileName);
 
 		try
 		{
@@ -282,7 +297,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
 
 		string fileName = GetHashFileName(key);
-		using var keyLock = keyLocker.AcquireSpinLock(fileName);
+		using var keyLock = keyLocker.Lock(fileName);
 
 		try
 		{
@@ -290,7 +305,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 			using BinaryWriter writer = new(writerStream);
 			DateTimeOffset expires = dateTimeProvider.UtcNow + cacheParameters.Duration;
 			writer.Write(expires.Ticks);
-			byte[]? bytes = serializer.Serialize(value);
+			byte[]? bytes = (value is byte[] alreadyBytes ? alreadyBytes : Serializer.Serialize(value));
 			if (bytes is not null)
 			{
 				writer.Write(bytes.Length);
@@ -322,7 +337,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 			foreach (string fileName in Directory.EnumerateFiles(baseDir))
 			{
 				foundFile = true;
-				using var keyLock = keyLocker.AcquireSpinLock(fileName);
+				using var keyLock = keyLocker.Lock(fileName);
 				try
 				{
 					// delete file and increment free space

@@ -1,9 +1,9 @@
 ﻿namespace DigitalRuby.SimpleCache;
 
 /// <summary>
-/// Allows locking on keys in a more thread friendly manner than just lock
+/// Allows locking on keys in a more thread friendly manner than just lock keyword
 /// </summary>
-internal sealed class KeyLocker
+public sealed class MultithreadedKeyLocker
 {
 	private readonly int[] keyLocks;
 
@@ -28,7 +28,7 @@ internal sealed class KeyLocker
 	/// Constructor
 	/// </summary>
 	/// <param name="size">Size of key locks, default of 512 is usually good enough</param>
-	public KeyLocker(int size = 512)
+	public MultithreadedKeyLocker(int size = 512)
 	{
 		keyLocks = new int[size];
 	}
@@ -40,7 +40,7 @@ internal sealed class KeyLocker
 	/// <param name="keyLocks"></param>
 	/// <returns>Disposable to release the lock</returns>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	internal IDisposable AcquireSpinLock(string key)
+	internal IDisposable Lock(string key)
 	{
 		// faster than lock, especially if many threads or connections are active at once
 		uint keyHash = (uint)key.GetHashCode() % (uint)keyLocks.Length;

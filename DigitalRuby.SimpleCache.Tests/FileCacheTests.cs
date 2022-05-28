@@ -5,11 +5,15 @@ namespace DigitalRuby.SimpleCache.Tests;
 /// </summary>
 public class FileCacheTests : IDateTimeProvider, IDiskSpace
 {
-	/// <summary>
-	/// Mock date/time
-	/// </summary>
+	/// <inheritdoc />
 	public DateTimeOffset UtcNow { get; set; }
-	
+
+	/// <inheritdoc />
+	public Task DelayAsync(TimeSpan interval, CancellationToken cancelToken = default)
+	{
+		return Task.CompletedTask;
+	}
+
 	/// <summary>
 	/// Mock disk space
 	/// </summary>
@@ -35,7 +39,7 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 	{
 		const int testCount = 10;
 		const string data = "74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F";
-		using FileCache fileCache = new(this, this, new NullLogger<FileCache>());
+		using FileCache fileCache = new(new JsonLZ4Serializer(), this, this, new NullLogger<FileCache>());
 
 		var item = await fileCache.GetAsync<string>("key1");
 		Assert.That(item, Is.Null);

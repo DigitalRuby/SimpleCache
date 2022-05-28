@@ -1,9 +1,11 @@
-﻿namespace DigitalRuby.SimpleCache;
+﻿using K4os.Compression.LZ4;
+
+namespace DigitalRuby.SimpleCache;
 
 /// <summary>
 /// Interface for serializing cache objects to/from bytes
 /// </summary>
-internal interface ISerializer
+public interface ISerializer
 {
     /// <summary>
     /// Deserialize
@@ -43,8 +45,8 @@ internal sealed class JsonLZ4Serializer : ISerializer
         {
             return null;
         }
-        using var stream = LZ4Stream.Decode(new MemoryStream(bytes));
-        var result = System.Text.Json.JsonSerializer.Deserialize(stream, type);
+        byte[] decompressedBytes = LZ4Pickler.Unpickle(bytes);
+        var result = System.Text.Json.JsonSerializer.Deserialize(decompressedBytes, type);
         return result;
     }
 
@@ -59,21 +61,12 @@ internal sealed class JsonLZ4Serializer : ISerializer
         {
             return null;
         }
-        MemoryStream ms = new();
-        {
-            using var stream = LZ4Stream.Encode(ms, leaveOpen: true);
-            System.Text.Json.JsonSerializer.Serialize(stream, obj);
-        }
-        return ms.ToArray();
+        var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(obj);
+        return LZ4Pickler.Pickle(bytes);
     }
 
     /// <summary>
     /// Description
     /// </summary>
     public string Description { get; } = "json-lz4";
-
-    /// <summary>
-    /// Singleton instance (thread safe)
-    /// </summary>
-    public static JsonLZ4Serializer Instance { get; } = new();
 }
