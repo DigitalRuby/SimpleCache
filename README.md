@@ -1,4 +1,5 @@
-# SimpleCache
+<h1 align="center">SimpleCache</h1>
+
 SimpleCache removes the headache and pain of getting caching right in .NET.
 
 Simple cache has three layers to give you maximum performance:

@@ -4,7 +4,35 @@
 		<TargetFramework>net6.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<IsPackable>true</IsPackable>
+		<Version>1.0.0</Version>
+		<Title>Simple Cache</Title>
+		<Authors>jjxtra</Authors>
+		<Company>Digital Ruby, LLC</Company>
+		<Description>Simple and powerful caching for .NET using three layers: RAM, file and redis.</Description>
+		<Copyright>(c) 2022-Present Digital Ruby, LLC</Copyright>
+		<PackageProjectUrl>https://github.com/DigitalRuby/SimpleCache</PackageProjectUrl>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/DigitalRuby/SimplePubSub</RepositoryUrl>
+		<PackageTags>cache;simple;easy;ram;memory;file;disk;redis;distributed;idistributedcache;iconnectionmultiplexer;lock;distributedlock;stackexchange;stackoverflow;connectionmultiplexer;lazy;task;storm</PackageTags>
+		<PackageReleaseNotes>Initial version</PackageReleaseNotes>
+		<AssemblyVersion></AssemblyVersion>
+		<FileVersion></FileVersion>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Include="..\icon.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	  <None Include="..\README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="K4os.Compression.LZ4.Streams" Version="1.2.16" />
