@@ -107,7 +107,19 @@ public static class ServicesExtensions
             {
                 stackExchangeRedisOptions.AllowAdmin = true;
                 using var admin = ConnectionMultiplexer.Connect(stackExchangeRedisOptions);
-                admin.GetServer(admin.GetEndPoints().Single()).ConfigSet("notify-keyspace-events", "KEA");
+                var existing = admin.GetServer(admin.GetEndPoints().Single()).ConfigGet("notify-keyspace-events");
+                if (existing is null ||
+                    existing.Length == 0 ||
+                    !existing.Any(kv =>
+                    {
+                        var v = kv.Value ?? string.Empty;
+                        return v.Contains('K', StringComparison.OrdinalIgnoreCase) &&
+                        v.Contains('E', StringComparison.OrdinalIgnoreCase) &&
+                        v.Contains('A', StringComparison.OrdinalIgnoreCase);
+                    }))
+                {
+                    admin.GetServer(admin.GetEndPoints().Single()).ConfigSet("notify-keyspace-events", "KEA");
+                }
             }
             catch
             {
