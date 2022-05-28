@@ -1,11 +1,9 @@
-﻿using K4os.Compression.LZ4;
-
-namespace DigitalRuby.SimpleCache;
+﻿namespace DigitalRuby.SimpleCache;
 
 /// <summary>
-/// Compressed json serializer using lz4
+/// Uncompressed json serializer
 /// </summary>
-public sealed class JsonLZ4Serializer : ISerializer
+public sealed class JsonSerializer : ISerializer
 {
     /// <inheritdoc />
     public object? Deserialize(byte[]? bytes, Type type)
@@ -14,8 +12,7 @@ public sealed class JsonLZ4Serializer : ISerializer
         {
             return null;
         }
-        byte[] decompressedBytes = LZ4Pickler.Unpickle(bytes);
-        var result = System.Text.Json.JsonSerializer.Deserialize(decompressedBytes, type);
+        var result = System.Text.Json.JsonSerializer.Deserialize(bytes, type);
         return result;
     }
 
@@ -27,9 +24,9 @@ public sealed class JsonLZ4Serializer : ISerializer
             return null;
         }
         var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(obj);
-        return LZ4Pickler.Pickle(bytes);
+        return bytes;
     }
 
     /// <inheritdoc />
-    public string Description { get; } = "json-lz4";
+    public string Description { get; } = "json";
 }

@@ -3,13 +3,8 @@
 /// <summary>
 /// Allows mocking current date/time and delays
 /// </summary>
-public interface IDateTimeProvider
+public interface IClockHandler : ISystemClock
 {
-	/// <summary>
-	/// Current date/time
-	/// </summary>
-	DateTimeOffset UtcNow { get; }
-
 	/// <summary>
 	/// Delay for a set amount of time
 	/// </summary>
@@ -20,9 +15,9 @@ public interface IDateTimeProvider
 }
 
 /// <summary>
-/// Piggy back on IDateTimeProvider interface
+/// Implement IClockHandler
 /// </summary>
-public sealed class DateTimeProvider : IDateTimeProvider
+public sealed class ClockHandler : IClockHandler
 {
 	/// <inheritdoc />
 	public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;

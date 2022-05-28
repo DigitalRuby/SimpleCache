@@ -5,9 +5,17 @@ VisualStudioVersion = 17.2.32519.379
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DigitalRuby.SimpleCache", "DigitalRuby.SimpleCache\DigitalRuby.SimpleCache.csproj", "{20A96010-CAEF-4ADF-A076-9434261916BE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalRuby.SimpleCache.Tests", "DigitalRuby.SimpleCache.Tests\DigitalRuby.SimpleCache.Tests.csproj", "{A82855AE-B0FD-4B77-8839-A29A094F706A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DigitalRuby.SimpleCache.Tests", "DigitalRuby.SimpleCache.Tests\DigitalRuby.SimpleCache.Tests.csproj", "{A82855AE-B0FD-4B77-8839-A29A094F706A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DigitalRuby.SimpleCache.Sandbox", "DigitalRuby.SimpleCache.Sandbox\DigitalRuby.SimpleCache.Sandbox.csproj", "{CB0257DD-3D4A-4C42-B7C0-EC626C662CFA}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DigitalRuby.SimpleCache.Sandbox", "DigitalRuby.SimpleCache.Sandbox\DigitalRuby.SimpleCache.Sandbox.csproj", "{CB0257DD-3D4A-4C42-B7C0-EC626C662CFA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionItems", "SolutionItems", "{96B77B60-6CDC-47A9-8861-B55FC991CA5C}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		icon.png = icon.png
+		LICENSE = LICENSE
+		README.md = README.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

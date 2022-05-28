@@ -6,15 +6,15 @@
 public interface ILayeredCache : IDisposable
 {
 	/// <summary>
-	/// Get or create an item from the cache.
+	/// Get or create an item from the cache. This will lock the key, preventing cache storm.
 	/// </summary>
 	/// <typeparam name="T">Type of item</typeparam>
 	/// <param name="key">Cache key</param>
-	/// <param name="cacheTime">Cache time</param>
+	/// <param name="cacheParam">Cache parameters</param>
 	/// <param name="factory">Factory method if no item is in the cache</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task of return of type T</returns>
-	Task<T> GetOrCreateAsync<T>(string key, TimeSpan cacheTime, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
+	Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to retrieve value of T by key.
@@ -31,10 +31,10 @@ public interface ILayeredCache : IDisposable
 	/// <typeparam name="T">Type of object</typeparam>
 	/// <param name="key">Cache key to set</param>
 	/// <param name="obj">Object to set</param>
-	/// <param name="cacheTime">Duration to cache object</param>
+	/// <param name="cacheParam">Cache parameters</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
-	Task SetAsync<T>(string key, T obj, TimeSpan cacheTime, CancellationToken cancelToken = default);
+	Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to delete an entry of T type by key. If there is no key found, nothing happens.
@@ -51,8 +51,8 @@ public interface ILayeredCache : IDisposable
 /// </summary>
 public sealed class NullLayeredCache : ILayeredCache
 {
-	/// <inheritdoc />
-	public void Dispose() { }
+    /// <inheritdoc />
+    public void Dispose() { }
 
 	/// <inheritdoc />
 	public Task DeleteAsync<T>(string key, CancellationToken cancelToken = default) => Task.CompletedTask;
@@ -61,11 +61,11 @@ public sealed class NullLayeredCache : ILayeredCache
 	public Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default) => Task.FromResult<T?>(default);
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, TimeSpan cacheTime, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default) =>
+	public Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default) =>
 		factory(cancelToken);
 
 	/// <inheritdoc />
-	public Task SetAsync<T>(string key, T obj, TimeSpan cacheTime, CancellationToken cancelToken = default) => Task.CompletedTask;
+	public Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -77,20 +77,14 @@ public sealed class LayeredCacheOptions
 	/// Key prefix, all keys will be automatically prefixed with this value. You could use your service name for example.
 	/// </summary>
 	public string KeyPrefix { get; set; } = string.Empty;
-
-	/// <summary>
-	/// Maximum size of memory cache, in megabytes
-	/// </summary>
-	public long MaxMemoryCacheSize = 1024; // 1gb default
 }
 
 /// <inheritdoc />
-public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDisposable, IHostedService
+public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDisposable
 {
 	private static readonly TimeSpan defaultCacheTime = TimeSpan.FromMinutes(5.0);
 
 	private readonly string keyPrefix;
-	private readonly long maxMemorySize;
 	private readonly ISerializer serializer;
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
@@ -98,8 +92,6 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	private readonly ILogger logger;
 	private readonly AsyncPolicyWrap cachePolicy;
 	private readonly AsyncPolicy distributedCacheCircuitBreakPolicy;
-
-	private bool running = true;
 
 	/// <summary>
 	/// Constructor
@@ -118,7 +110,6 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		ILogger<LayeredCache> logger)
 	{
 		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";
-		this.maxMemorySize = options.MaxMemoryCacheSize * 1024 * 1024; // convert to bytes
 		this.serializer = serializer;
 		this.memoryCache = memoryCache;
 		this.fileCache = fileCache;
@@ -141,7 +132,6 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	public void Dispose()
 	{
 		distributedCache.KeyChanged -= DistributedCacheKeyChanged;
-		running = false;
 	}
 
 	/// <inheritdoc />
@@ -192,7 +182,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	}
 
 	/// <inheritdoc />
-	public async Task SetAsync<T>(string key, T obj, TimeSpan cacheTime, CancellationToken cancelToken = default)
+	public async Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default)
 	{
 		ValidateType<T>();
 		if (obj is null)
@@ -204,16 +194,24 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		var distributedCacheBytes = SerializeObject(obj);
 
 		// L1 cache (RAM)
-		memoryCache.Set(key, obj, cacheTime);
+		memoryCache.Set(key, obj, new MemoryCacheEntryOptions
+		{
+			AbsoluteExpirationRelativeToNow = cacheParam.Duration,
+			Size = cacheParam.Size
+		});
 		logger.LogDebug("Memory cache set {key}", key);
 
 		// L2 cache (file)
-		await fileCache.SetAsync(key, distributedCacheBytes, cacheTime, cancelToken);
+		await fileCache.SetAsync(key, distributedCacheBytes, cacheParam, cancelToken);
 
 		// L3 cache (redis)
 		try
 		{
-			await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.SetAsync(key, new DistributedCacheItem { Bytes = distributedCacheBytes, Expiry = cacheTime }));
+			await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.SetAsync(key, new DistributedCacheItem
+			{
+				Bytes = distributedCacheBytes,
+				Expiry = cacheParam.Duration
+			}));
 		}
 		catch (Exception ex)
 		{
@@ -244,13 +242,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	}
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, TimeSpan cacheTime, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default)
+	public Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default)
 	{
 		ValidateType<T>();
 
 		key = FormatKey<T>(key);
 
-		var pollyContext = new Context(key, new Dictionary<string, object> { { "CacheTime", cacheTime } });
+		var pollyContext = new Context(key, new Dictionary<string, object> { { "CacheParam", cacheParam } });
 		return cachePolicy.ExecuteAsync((ctx, cancelToken) => factory(cancelToken), pollyContext, cancelToken);
 	}
 
@@ -276,12 +274,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		{
 			logger.LogDebug("Memory cache get or create miss {key}", key);
 
-			if (!context.TryGetValue("CacheTime", out object? value) ||
-				value is not TimeSpan cacheTime)
+			if (!context.TryGetValue("CacheParam", out var value) ||
+				value is not CacheParameters cacheParam)
 			{
-				cacheTime = defaultCacheTime;
+				throw new ArgumentException("Invalid CacheParam key in cache context");
 			}
-			entry.Size = 128;
+			entry.Size = cacheParam.Size;
+			entry.AbsoluteExpirationRelativeToNow = cacheParam.Duration;
 
 			// check file cache (L2)
 			var fileItem = await fileCache.GetAsync<T>(key, cancellationToken);
@@ -322,14 +321,18 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 			// L2 cache (file)
 			// file cache can take raw bytes and will not additional serialization on them
-			await fileCache.SetAsync(key, distributedCacheBytes, cacheTime);
+			await fileCache.SetAsync(key, distributedCacheBytes, cacheParam.Duration);
 
 			// L3 cache (redis)
 			try
 			{
-				await distributedCacheCircuitBreakPolicy.ExecuteAsync(async () =>
+				await distributedCacheCircuitBreakPolicy.ExecuteAsync(() =>
 				{
-					await distributedCache.SetAsync(key, new DistributedCacheItem { Bytes = distributedCacheBytes, Expiry = cacheTime });
+					return distributedCache.SetAsync(key, new DistributedCacheItem
+					{
+						Bytes = distributedCacheBytes,
+						Expiry = cacheParam.Duration
+					});
 				});
 			}
 			catch (Exception ex)
@@ -380,37 +383,6 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		return $"{keyPrefix}{typeof(T).FullName}:{serializer.Description}:{key}";
 	}
 
-	private async Task MemoryCompactionTask(CancellationToken stoppingToken)
-	{
-        if (memoryCache is not MemoryCache memoryCacheImpl)
-        {
-			logger.LogError($"Unable to auto-compact memory cache because {nameof(IMemoryCache)} is not a {nameof(MemoryCache)}");
-			return;
-        }
-
-        while (!stoppingToken.IsCancellationRequested && running)
-		{
-			try
-			{
-				long managedHeap = GC.GetTotalMemory(false);
-
-				// if we hit our memory limit, start compacting by half
-				if (managedHeap > maxMemorySize)
-				{
-					memoryCacheImpl.Compact(0.5);
-					GC.Collect();
-					logger.LogDebug("Compacted cache by half due to memory pressure. Max ram = {maxMemorySize}, gc heap = {managedHeap}",
-						maxMemorySize, managedHeap);
-				}
-			}
-			catch (Exception ex)
-			{
-				logger.LogError(ex, "Error compacting memory cache");
-			}
-			await Task.Delay(10000, stoppingToken);
-		}
-	}
-
 	private static void ValidateType<T>()
 	{
 		Type t = typeof(T);
@@ -422,20 +394,5 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		{
 			throw new InvalidOperationException("Primitives cannot be cached");
 		}
-	}
-
-	/// <inheritdoc />
-	Task IHostedService.StartAsync(CancellationToken cancellationToken)
-	{
-		// kick off memory compaction in background
-		MemoryCompactionTask(cancellationToken).GetAwaiter();
-		return Task.CompletedTask;
-	}
-
-	/// <inheritdoc />
-	Task IHostedService.StopAsync(CancellationToken cancellationToken)
-	{
-		running = false;
-		return Task.CompletedTask;
 	}
 }

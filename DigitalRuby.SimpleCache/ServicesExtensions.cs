@@ -5,6 +5,13 @@
 /// </summary>
 public static class ServicesExtensions
 {
+    private sealed class MemoryOptionsProvider : IOptions<MemoryCacheOptions>
+    {
+        public MemoryOptionsProvider(MemoryCacheOptions options) => Value = options;
+
+        public MemoryCacheOptions Value { get; }
+    }
+
     private sealed class Resolver
     {
         public IServiceProvider? Provider { get; set; }
@@ -80,8 +87,7 @@ public static class ServicesExtensions
 
         var layerCacheOptions = new LayeredCacheOptions
         {
-            KeyPrefix = configuration.KeyPrefix,
-            MaxMemoryCacheSize = configuration.MaxMemorySize
+            KeyPrefix = configuration.KeyPrefix
         };
 
         // a little hacky because of poor api design around AddStackExchangeRedisCache not exposing IServiceProvider
@@ -91,22 +97,39 @@ public static class ServicesExtensions
         services.AddSingleton(resolver);
         services.AddHostedService<SimpleCacheHelperService>();
         services.AddSingleton(layerCacheOptions);
+        services.AddSingleton<ClockHandler>();
+        services.AddSingleton<IClockHandler>(provider => provider.GetRequiredService<ClockHandler>());
+        services.Replace(new ServiceDescriptor(typeof(ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
         services.AddSingleton<IConnectionMultiplexer>(provider => ConnectionMultiplexer.Connect(redisOptions));
         services.AddStackExchangeRedisCache(cfg =>
         {
             cfg.ConnectionMultiplexerFactory = () => Task.FromResult<IConnectionMultiplexer>(resolver.Provider!.GetRequiredService<IConnectionMultiplexer>());
         });
-        services.AddMemoryCache();
+
+        // another deficiency in the .NET api here, we need the provider to pull out the correct system clock
+        // in case it has been replaced
+        // the add memory cache extension method is not sufficient
+        services.AddSingleton<MemoryCache>(provider => new MemoryCache(new MemoryOptionsProvider(new MemoryCacheOptions
+        {
+            // set size limit in bytes
+            SizeLimit = configuration.MaxMemorySize * 1024 * 1024,
+            ExpirationScanFrequency = TimeSpan.FromSeconds(10.0),
+            CompactionPercentage = 0.5,
+            Clock = provider.GetRequiredService<ISystemClock>()
+        })));
+        services.AddSingleton<IMemoryCache>(provider => provider.GetRequiredService<MemoryCache>());
         services.AddSingleton<ISerializer>(configuration.SerializerObject);
-        services.AddSingleton<IDateTimeProvider>(new DateTimeProvider());
+        services.AddSingleton<IDiskSpace, DiskSpace>();
         services.AddSingleton<IFileCache>(provider => !string.IsNullOrWhiteSpace(configuration.FileCacheDirectory)
             ? new FileCache(fileOptions,
             provider.GetRequiredService<ISerializer>(),
-            new DiskSpace(),
-            provider.GetRequiredService<IDateTimeProvider>(),
+            provider.GetRequiredService<IDiskSpace>(),
+            provider.GetRequiredService<IClockHandler>(),
             provider.GetRequiredService<ILogger<FileCache>>())
             : new NullFileCache());
-        services.AddSingleton<IDistributedCache, DistributedRedisCache>();
+        services.AddSingleton<DistributedRedisCache>();
+        services.AddSingleton<IDistributedCache>(provider => provider.GetRequiredService<DistributedRedisCache>());
+        services.AddSingleton<IDistributedLockFactory>(provider => provider.GetRequiredService<DistributedRedisCache>());
         services.AddSingleton<ILayeredCache, LayeredCache>();
     }
 }

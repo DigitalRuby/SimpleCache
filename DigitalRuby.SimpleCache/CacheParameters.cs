@@ -19,10 +19,15 @@ public struct CacheParameters
 	/// Constructor
 	/// </summary>
 	/// <param name="duration">Duration</param>
-	public CacheParameters(TimeSpan duration)
+	/// <param name="jitterDuration">Whether to jitter the duration</param>
+	public CacheParameters(TimeSpan duration, bool jitterDuration = true)
 	{
 		Duration = duration;
 		Size = DefaultSize;
+		if (jitterDuration)
+		{
+			JitterDuration();
+		}
 	}
 
 	/// <summary>
@@ -30,10 +35,15 @@ public struct CacheParameters
 	/// </summary>
 	/// <param name="duration">Duration</param>
 	/// <param name="size">Size</param>
-	public CacheParameters(TimeSpan duration, int size)
+	/// <param name="jitterDuration">Whether to jitter the duration</param>
+	public CacheParameters(TimeSpan duration, int size, bool jitterDuration = true)
 	{
 		Duration = duration;
-		Size = size;
+		Size = size <= 0 ? DefaultSize : size;
+		if (jitterDuration)
+		{
+			JitterDuration();
+		}
 	}
 
 	/// <summary>
@@ -53,33 +63,32 @@ public struct CacheParameters
 	private static readonly ThreadLocal<Random> jitter = new(() => new Random());
 
 	/// <summary>
-	/// Jitter the cache duration, ensure that we don't have a bunch of stuff expiring right at the same time
+	/// Wiggle the cache duration slightly to avoid having multiple cache items expire all at once
 	/// </summary>
-	/// <param name="cacheParameters">Cache parameters</param>
-	internal static void JitterDuration(ref CacheParameters cacheParameters)
+	private void JitterDuration()
 	{
 		double upperJitter;
-		if (cacheParameters.Duration.TotalMinutes <= 1.0)
+		if (Duration.TotalMinutes <= 1.0)
 		{
 			// don't jitter cache times 1 minute or less
 			return;
 		}
-		else if (cacheParameters.Duration.TotalMinutes <= 15.0)
+		else if (Duration.TotalMinutes <= 15.0)
 		{
 			// up to 15 min
 			upperJitter = 1.2;
 		}
-		else if (cacheParameters.Duration.TotalMinutes <= 60.0)
+		else if (Duration.TotalMinutes <= 60.0)
 		{
 			// up to 1 hour
 			upperJitter = 1.15;
 		}
-		else if (cacheParameters.Duration.TotalMinutes <= 360.0)
+		else if (Duration.TotalMinutes <= 360.0)
 		{
 			// up to 6 hours
 			upperJitter = 1.1;
 		}
-		else if (cacheParameters.Duration.TotalMinutes <= 1440.0)
+		else if (Duration.TotalMinutes <= 1440.0)
 		{
 			// up to 24 hours
 			upperJitter = 1.05;
@@ -92,8 +101,8 @@ public struct CacheParameters
 
 		double randomDouble = jitter.Value!.NextDouble();
 		double multiplier = 1.0 + (randomDouble * upperJitter);
-		long jitteredTicks = (long)(cacheParameters.Duration.Ticks * multiplier);
-		cacheParameters.Duration = TimeSpan.FromTicks(jitteredTicks);
+		long jitteredTicks = (long)(Duration.Ticks * multiplier);
+		Duration = TimeSpan.FromTicks(jitteredTicks);
 	}
 
 	/// <summary>

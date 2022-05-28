@@ -142,6 +142,45 @@ public sealed class NullFileCache : IFileCache
     }
 }
 
+/// <summary>
+/// File cache for unit tests
+/// </summary>
+public sealed class MemoryFileCache : IFileCache
+{
+	private readonly ISystemClock clock;
+	private readonly ConcurrentDictionary<string, FileCacheItem<object>> items = new();
+
+	public MemoryFileCache(ISystemClock clock) => this.clock = clock;
+
+	/// <inheritdoc />
+	public ISerializer Serializer => new JsonLZ4Serializer();
+
+	/// <inheritdoc />
+	public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
+    {
+		if (items.TryGetValue(key, out var item))
+		{
+			T value = (T)item.Item;
+			return Task.FromResult<FileCacheItem<T>?>(new FileCacheItem<T>(item.Expires, value));
+		}
+		return Task.FromResult<FileCacheItem<T>?>(null);
+    }
+
+	/// <inheritdoc />
+	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
+    {
+		items.TryRemove(key, out _);
+		return Task.CompletedTask;
+    }
+
+	/// <inheritdoc />
+	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+    {
+		items[key] = new FileCacheItem<object>(clock.UtcNow + cacheParameters.Duration, value);
+		return Task.CompletedTask;
+    }
+}
+
 /// <inheritdoc />
 public sealed class FileCache : BackgroundService, IFileCache
 {
@@ -150,7 +189,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 	private readonly MultithreadedKeyLocker keyLocker = new(512);
 
 	private readonly IDiskSpace diskSpace;
-	private readonly IDateTimeProvider dateTimeProvider;
+	private readonly IClockHandler clock;
 	private readonly ILogger logger;
 
 	private readonly string baseDir;
@@ -180,17 +219,17 @@ public sealed class FileCache : BackgroundService, IFileCache
 	/// <param name="options">Options</param>
 	/// <param name="serializer">Serializer</param>
 	/// <param name="diskSpace">Disk space</param>
-	/// <param name="dateTimeProvider">Date time provider</param>
+	/// <param name="clock">Clock handler</param>
 	/// <param name="logger">Logger</param>
 	public FileCache(FileCacheOptions options,
 		ISerializer serializer,
 		IDiskSpace diskSpace,
-		IDateTimeProvider dateTimeProvider,
+		IClockHandler clock,
 		ILogger<FileCache> logger)
 	{
 		Serializer = serializer;
 		this.diskSpace = diskSpace;
-		this.dateTimeProvider = dateTimeProvider;
+		this.clock = clock;
 		this.logger = logger;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
 		baseDir = options.CacheDirectory;
@@ -229,7 +268,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 			using BinaryReader reader = new(readerStream);
 			long ticks = reader.ReadInt64();
 			DateTimeOffset cutOff = new(ticks, TimeSpan.Zero);
-			if (dateTimeProvider.UtcNow >= cutOff)
+			if (clock.UtcNow >= cutOff)
 			{
 				// expired, delete, no exception for performance
 				logger.LogDebug("File cache expired {key}, {fileName}, deleting", key, fileName);
@@ -319,7 +358,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 		{
 			using FileStream writerStream = new(fileName, FileMode.Create, FileAccess.Write, FileShare.None);
 			using BinaryWriter writer = new(writerStream);
-			DateTimeOffset expires = dateTimeProvider.UtcNow + cacheParameters.Duration;
+			DateTimeOffset expires = clock.UtcNow + cacheParameters.Duration;
 			writer.Write(expires.Ticks);
 			byte[]? bytes = (value is byte[] alreadyBytes ? alreadyBytes : Serializer.Serialize(value));
 			if (bytes is not null)
@@ -375,7 +414,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 				}
 
 				// don't gobble up too much cpu
-				await dateTimeProvider.DelayAsync(cleanupLoopDelay, stoppingToken);
+				await clock.DelayAsync(cleanupLoopDelay, stoppingToken);
 			}
 
 			// if no files, we are done, get out of the loop

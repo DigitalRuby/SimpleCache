@@ -69,7 +69,11 @@ public interface IDistributedCache
 /// </summary>
 public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLockFactory
 {
-    private sealed class FakeDistributedLock : IAsyncDisposable
+	private readonly ISystemClock clock;
+
+	public DistributedMemoryCache(ISystemClock clock) => this.clock = clock;
+
+	private sealed class FakeDistributedLock : IAsyncDisposable
     {
         public ValueTask DisposeAsync()
         {
@@ -328,7 +332,7 @@ public interface IDistributedLockFactory
 	/// Attempt to acquire a distributed lock
 	/// </summary>
 	/// <param name="key">Lock key</param>
-	/// <param name="lockTime">Duration to acquire the lock before it auto-expires</param>
+	/// <param name="lockTime">Duration to hold the lock before it auto-expires. Set this to the maximum possible duration you think your code might hold the lock.</param>
 	/// <param name="timeout">Time out to acquire the lock or default to only make one attempt to acquire the lock</param>
 	/// <returns>The lock or null if the lock could not be acquired</returns>
 	Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default);
