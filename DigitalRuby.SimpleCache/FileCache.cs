@@ -154,48 +154,36 @@ public sealed class FileCache : BackgroundService, IFileCache
 	private readonly ILogger logger;
 
 	private readonly string baseDir;
-
-	/// <summary>
-	/// Threshold of free space to purge all files
-	/// </summary>
-	public double FreeSpaceThreshold { get; set; } = 0.2;
+	private readonly double freeSpaceThreshold;
 
 	/// <summary>
 	/// Serializer
 	/// </summary>
 	public ISerializer Serializer { get; }
 
-	/// <summary>
-	/// Converts a byte array to a string of hexadecimals.
-	/// </summary>
-	public static string ToHexString(byte[] bytes)
-	{
-		if (bytes == null)
-		{
-			throw new ArgumentNullException(nameof(bytes));
-		}
-		var sb = new StringBuilder(bytes.Length * 2);
-		for (int i = 0; i < bytes.Length; i++)
-		{
-			sb.Append(bytes[i].ToString("x2"));
-		}
-		return sb.ToString();
-	}
-
 	private string GetHashFileName(string key)
 	{
 		var hash = Blake2b.ComputeHash(16, Encoding.UTF8.GetBytes(key));
-		return Path.Combine(baseDir, ToHexString(hash));
+
+		// get a base64 file name from hash bytes and fix invalid path chars
+		var fileName = Convert.ToBase64String(hash)
+			.Replace('/', '_')
+			.Replace('+', '-')
+			.Replace("=", string.Empty); // padding, can remove for shorter file name
+
+		return Path.Combine(baseDir, fileName);
 	}
 
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="options">Options</param>
 	/// <param name="serializer">Serializer</param>
 	/// <param name="diskSpace">Disk space</param>
 	/// <param name="dateTimeProvider">Date time provider</param>
 	/// <param name="logger">Logger</param>
-	public FileCache(ISerializer serializer,
+	public FileCache(FileCacheOptions options,
+		ISerializer serializer,
 		IDiskSpace diskSpace,
 		IDateTimeProvider dateTimeProvider,
 		ILogger<FileCache> logger)
@@ -205,8 +193,18 @@ public sealed class FileCache : BackgroundService, IFileCache
 		this.dateTimeProvider = dateTimeProvider;
 		this.logger = logger;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
-		baseDir = Path.Combine(Path.GetTempPath(), assemblyName, nameof(FileCache));
+		baseDir = options.CacheDirectory;
+		if (string.IsNullOrWhiteSpace(baseDir) || baseDir.IndexOfAny(Path.GetInvalidPathChars()) > 0)
+		{
+			throw new ArgumentException("Invalid file cache directory: " + baseDir);
+		}
+		else if (baseDir.Equals("%temp%", StringComparison.OrdinalIgnoreCase))
+		{
+			baseDir = Path.GetTempPath();
+		}
+		baseDir = Path.Combine(baseDir, assemblyName, nameof(FileCache));
 		Directory.CreateDirectory(baseDir);
+		freeSpaceThreshold = (double)options.FreeSpaceThreshold * 0.01;
 		double freePercent = diskSpace.GetPercentFreeSpace(baseDir, out long availableFreeSpace, out long totalSpace);
 		this.logger.LogWarning("Disk space free: {freePercent:0.00}% ({availableFreeSpace}/{totalFreeSpace})",
 			freePercent * 100.0, availableFreeSpace, totalSpace);
@@ -348,8 +346,8 @@ public sealed class FileCache : BackgroundService, IFileCache
 		// if low on disk space, purge it all
 		while (true)
 		{
-			double freeSpace = diskSpace.GetPercentFreeSpace(baseDir, out long availableFreeSpace, out long totalSpace);
-			if (freeSpace >= FreeSpaceThreshold)
+			double freeSpacePercent = diskSpace.GetPercentFreeSpace(baseDir, out long availableFreeSpace, out long totalSpace);
+			if (freeSpacePercent >= freeSpaceThreshold)
 			{
 				break;
 			}
@@ -366,7 +364,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 					availableFreeSpace += fileSize;
 
 					// if we have freed up enough space, stop deleting files
-					if ((double)availableFreeSpace / (double)totalSpace >= FreeSpaceThreshold)
+					if ((double)availableFreeSpace / (double)totalSpace >= freeSpaceThreshold)
 					{
 						break;
 					}
@@ -398,4 +396,20 @@ public sealed class FileCache : BackgroundService, IFileCache
 			await Task.Delay(10000, stoppingToken);
 		}
 	}
+}
+
+/// <summary>
+/// File cache options
+/// </summary>
+public sealed class FileCacheOptions
+{
+	/// <summary>
+	/// Cache directory. Default is %temp% which means to use temp directory.
+	/// </summary>
+	public string CacheDirectory { get; set; } = "%temp%";
+
+	/// <summary>
+	/// Percentage (0 - 100) of free space remaining to trigger cleanup of files. Default is 15.
+	/// </summary>
+	public int FreeSpaceThreshold { get; set; } = 15;
 }

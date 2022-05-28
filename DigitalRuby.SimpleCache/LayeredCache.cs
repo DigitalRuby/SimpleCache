@@ -77,6 +77,11 @@ public sealed class LayeredCacheOptions
 	/// Key prefix, all keys will be automatically prefixed with this value. You could use your service name for example.
 	/// </summary>
 	public string KeyPrefix { get; set; } = string.Empty;
+
+	/// <summary>
+	/// Maximum size of memory cache, in megabytes
+	/// </summary>
+	public long MaxMemoryCacheSize = 1024; // 1gb default
 }
 
 /// <inheritdoc />
@@ -85,6 +90,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	private static readonly TimeSpan defaultCacheTime = TimeSpan.FromMinutes(5.0);
 
 	private readonly string keyPrefix;
+	private readonly long maxMemorySize;
 	private readonly ISerializer serializer;
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
@@ -112,6 +118,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		ILogger<LayeredCache> logger)
 	{
 		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";
+		this.maxMemorySize = options.MaxMemoryCacheSize * 1024 * 1024; // convert to bytes
 		this.serializer = serializer;
 		this.memoryCache = memoryCache;
 		this.fileCache = fileCache;
@@ -375,21 +382,25 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 	private async Task MemoryCompactionTask(CancellationToken stoppingToken)
 	{
-		const double maxMemory = 1024 * 1024 * 512; // 512 gb max memory hard-coded for now, we start compacting as we go over this
-		MemoryCache? memoryCacheImpl = memoryCache as MemoryCache;
-		while (!stoppingToken.IsCancellationRequested && running)
+        if (memoryCache is not MemoryCache memoryCacheImpl)
+        {
+			logger.LogError($"Unable to auto-compact memory cache because {nameof(IMemoryCache)} is not a {nameof(MemoryCache)}");
+			return;
+        }
+
+        while (!stoppingToken.IsCancellationRequested && running)
 		{
 			try
 			{
 				long managedHeap = GC.GetTotalMemory(false);
 
 				// if we hit our memory limit, start compacting by half
-				if (managedHeap > maxMemory)
+				if (managedHeap > maxMemorySize)
 				{
-					memoryCacheImpl?.Compact(0.5);
+					memoryCacheImpl.Compact(0.5);
 					GC.Collect();
-					logger.LogDebug("Compacted cache by half due to memory pressure. Max ram = {maxMemory}, gc heap = {managedHeap}",
-						maxMemory, managedHeap);
+					logger.LogDebug("Compacted cache by half due to memory pressure. Max ram = {maxMemorySize}, gc heap = {managedHeap}",
+						maxMemorySize, managedHeap);
 				}
 			}
 			catch (Exception ex)

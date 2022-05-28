@@ -71,13 +71,26 @@ public static class ServicesExtensions
         }
         configuration.SerializerObject ??= new JsonLZ4Serializer();
 
+        var fileOptions = new FileCacheOptions
+        {
+            CacheDirectory = configuration.FileCacheDirectory,
+            FreeSpaceThreshold = configuration.FileCacheFreeSpaceThreshold
+        };
+        services.AddSingleton(fileOptions);
+
+        var layerCacheOptions = new LayeredCacheOptions
+        {
+            KeyPrefix = configuration.KeyPrefix,
+            MaxMemoryCacheSize = configuration.MaxMemorySize
+        };
+
         // a little hacky because of poor api design around AddStackExchangeRedisCache not exposing IServiceProvider
         Resolver resolver = new();
         var redisOptions = ConfigurationOptions.Parse(configuration.RedisConnectionString);
         redisOptions.AbortOnConnectFail = false; // can connect later if initial connection fails
-        services.AddSingleton<Resolver>(resolver);
+        services.AddSingleton(resolver);
         services.AddHostedService<SimpleCacheHelperService>();
-        services.AddSingleton<LayeredCacheOptions>(new LayeredCacheOptions { KeyPrefix = configuration.KeyPrefix });
+        services.AddSingleton(layerCacheOptions);
         services.AddSingleton<IConnectionMultiplexer>(provider => ConnectionMultiplexer.Connect(redisOptions));
         services.AddStackExchangeRedisCache(cfg =>
         {
@@ -86,8 +99,9 @@ public static class ServicesExtensions
         services.AddMemoryCache();
         services.AddSingleton<ISerializer>(configuration.SerializerObject);
         services.AddSingleton<IDateTimeProvider>(new DateTimeProvider());
-        services.AddSingleton<IFileCache>(provider => configuration.UseFileCache
-            ? new FileCache(provider.GetRequiredService<ISerializer>(),
+        services.AddSingleton<IFileCache>(provider => !string.IsNullOrWhiteSpace(configuration.FileCacheDirectory)
+            ? new FileCache(fileOptions,
+            provider.GetRequiredService<ISerializer>(),
             new DiskSpace(),
             provider.GetRequiredService<IDateTimeProvider>(),
             provider.GetRequiredService<ILogger<FileCache>>())
@@ -108,9 +122,14 @@ public sealed class SimpleCacheConfiguration
     public string RedisConnectionString { get; set; } = string.Empty;
 
     /// <summary>
-    /// Whether to use file cache. Turn this off if not using ssd drives.
+    /// Set the file cache directory. Default is %temp% (temp folder). Set to empty to not use file cache.
     /// </summary>
-    public bool UseFileCache { get; set; } = true;
+    public string FileCacheDirectory { get; set; } = "%temp%";
+
+    /// <summary>
+    /// Threshold percent (0-100) in which to clean up file cache files to reclaim disk space
+    /// </summary>
+    public int FileCacheFreeSpaceThreshold { get; set; } = 15;
 
     /// <summary>
     /// Specify the full type name of a serializer to use, or empty for default (json-lz4)
@@ -126,4 +145,9 @@ public sealed class SimpleCacheConfiguration
     /// Key prefix. Defaults to entry assembly name, if any.
     /// </summary>
     public string KeyPrefix { get; set; } = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name ?? string.Empty;
+
+    /// <summary>
+    /// Max memory size for memory cache (in megabytes)
+    /// </summary>
+    public long MaxMemorySize { get; set; } = 1024;
 }

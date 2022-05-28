@@ -39,7 +39,7 @@ public class FileCacheTests : IDateTimeProvider, IDiskSpace
 	{
 		const int testCount = 10;
 		const string data = "74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F";
-		using FileCache fileCache = new(new JsonLZ4Serializer(), this, this, new NullLogger<FileCache>());
+		using FileCache fileCache = new(new() { FreeSpaceThreshold = 20 }, new JsonLZ4Serializer(), this, this, new NullLogger<FileCache>());
 
 		var item = await fileCache.GetAsync<string>("key1");
 		Assert.That(item, Is.Null);
