@@ -68,11 +68,23 @@ public sealed class NullLayeredCache : ILayeredCache
 	public Task SetAsync<T>(string key, T obj, TimeSpan cacheTime, CancellationToken cancelToken = default) => Task.CompletedTask;
 }
 
+/// <summary>
+/// Layered cache options
+/// </summary>
+public sealed class LayeredCacheOptions
+{
+	/// <summary>
+	/// Key prefix, all keys will be automatically prefixed with this value. You could use your service name for example.
+	/// </summary>
+	public string KeyPrefix { get; set; } = string.Empty;
+}
+
 /// <inheritdoc />
 public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDisposable, IHostedService
 {
 	private static readonly TimeSpan defaultCacheTime = TimeSpan.FromMinutes(5.0);
 
+	private readonly string keyPrefix;
 	private readonly ISerializer serializer;
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
@@ -86,17 +98,20 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="options">Options.</param>
 	/// <param name="serializer">Serializer. This must be the same serializer that was used to create the file cache.</param>
 	/// <param name="memoryCache">Memory cache</param>
 	/// <param name="fileCache">File cache. Can pass NullFileCache to skip file caching layer. Recommend to use SSD only for this.</param>
 	/// <param name="distributedCache">Distributed cache</param>
 	/// <param name="logger">Logger</param>
-	public LayeredCache(ISerializer serializer,
+	public LayeredCache(LayeredCacheOptions options,
+		ISerializer serializer,
 		IMemoryCache memoryCache,
 		IFileCache fileCache,
 		IDistributedCache distributedCache,
 		ILogger<LayeredCache> logger)
 	{
+		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";
 		this.serializer = serializer;
 		this.memoryCache = memoryCache;
 		this.fileCache = fileCache;
@@ -324,9 +339,16 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 	private void DistributedCacheKeyChanged(string key)
 	{
-		logger.LogDebug("Distributed cache key changed: {key}, removing from memory and file cache", key);
-		memoryCache.Remove(key);
-		fileCache.RemoveAsync(key).GetAwaiter().GetResult();
+		if (key.StartsWith(keyPrefix))
+		{
+			memoryCache.Remove(key);
+			fileCache.RemoveAsync(key).GetAwaiter().GetResult();
+			logger.LogDebug("Distributed cache key changed: {key}, removed from memory and file cache", key);
+		}
+		else
+		{
+			logger.LogDebug("Ignoring distributed cache key change: {key}, not prefixed with {keyPrefix}", key, keyPrefix);
+		}
 	}
 
 	/// <inheritdoc />
@@ -348,7 +370,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 	private string FormatKey<T>(string key)
 	{
-		return $"{serializer.Description}-{typeof(T).FullName}-{key}";
+		return $"{keyPrefix}{typeof(T).FullName}:{serializer.Description}:{key}";
 	}
 
 	private async Task MemoryCompactionTask(CancellationToken stoppingToken)

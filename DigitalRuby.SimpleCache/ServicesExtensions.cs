@@ -77,6 +77,7 @@ public static class ServicesExtensions
         redisOptions.AbortOnConnectFail = false; // can connect later if initial connection fails
         services.AddSingleton<Resolver>(resolver);
         services.AddHostedService<SimpleCacheHelperService>();
+        services.AddSingleton<LayeredCacheOptions>(new LayeredCacheOptions { KeyPrefix = configuration.KeyPrefix });
         services.AddSingleton<IConnectionMultiplexer>(provider => ConnectionMultiplexer.Connect(redisOptions));
         services.AddStackExchangeRedisCache(cfg =>
         {
@@ -120,4 +121,9 @@ public sealed class SimpleCacheConfiguration
     /// Serializer to use for converting objects to bytes
     /// </summary>
     public ISerializer SerializerObject { get; set; } = new JsonLZ4Serializer();
+
+    /// <summary>
+    /// Key prefix. Defaults to entry assembly name, if any.
+    /// </summary>
+    public string KeyPrefix { get; set; } = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name ?? string.Empty;
 }
