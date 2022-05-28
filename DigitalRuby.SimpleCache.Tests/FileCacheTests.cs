@@ -145,5 +145,11 @@ public sealed class FileCacheTests : IClockHandler, IDiskSpace
 		await Task.WhenAll(tasks);
 		Console.WriteLine("Read/Expire {0} items in {1} ms", testCount, sw.Elapsed.TotalMilliseconds);
 		sw.Restart();
+
+		// make sure we can clear the entire cache in one shot
+		await fileCache.SetAsync("key", "value", TimeSpan.FromSeconds(30.0));
+		await fileCache.ClearAsync();
+		var result = await fileCache.GetAsync<string>("key");
+		Assert.That(result, Is.Null);
 	}
 }

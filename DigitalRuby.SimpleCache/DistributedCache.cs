@@ -57,11 +57,6 @@ public interface IDistributedCache
 	/// Key change event, get notified if a key changes outside of this machine
 	/// </summary>
 	event Action<string>? KeyChanged;
-
-	/// <summary>
-	/// Whether to publish key change events from this machine back to this machine, default is false
-	/// </summary>
-	bool PublishKeyChangedEventsBackToThisMachine { get; set; }
 }
 
 /// <summary>
@@ -82,9 +77,6 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
     }
 
     private readonly ConcurrentDictionary<string, (DateTimeOffset, byte[])> items = new();
-
-	/// <inheritdoc />
-    public bool PublishKeyChangedEventsBackToThisMachine { get; set; }
 
 	/// <inheritdoc />
 	public event Action<string>? KeyChanged;
@@ -137,17 +129,22 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 public sealed class DistributedRedisCache : BackgroundService, IDistributedCache, IDistributedLockFactory
 {
 	private readonly IConnectionMultiplexer connectionMultiplexer;
+	private readonly string keyPrefix;
 	private readonly ILogger<DistributedRedisCache> logger;
 
-	private ChannelMessageQueue? changeQueue;
+	private ISubscriber? changeQueue;
 
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="options">Options</param>
 	/// <param name="connectionMultiplexer">Connection multiplexer</param>
 	/// <param name="logger">Logger</param>
-	public DistributedRedisCache(IConnectionMultiplexer connectionMultiplexer, ILogger<DistributedRedisCache> logger)
+	public DistributedRedisCache(DistributedRedisCacheOptions options,
+		IConnectionMultiplexer connectionMultiplexer,
+		ILogger<DistributedRedisCache> logger)
 	{
+		this.keyPrefix = string.IsNullOrWhiteSpace(options.KeyPrefix) ? string.Empty : options.KeyPrefix + ":";
 		this.connectionMultiplexer = connectionMultiplexer;
 		this.logger = logger;
 
@@ -164,7 +161,6 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		return PerformOperation(async () =>
 		{
 			await connectionMultiplexer.GetDatabase().KeyDeleteAsync(key);
-			await connectionMultiplexer.GetSubscriber().PublishAsync("key.changed", Environment.MachineName + "\t" + key);
 			logger.LogDebug("Redis cache deleted {key}", key);
 			return true;
 		});
@@ -197,7 +193,6 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		return PerformOperation(async () =>
 		{
 			await connectionMultiplexer.GetDatabase().StringSetAsync(key, item.Bytes, expiry: item.Expiry);
-			await connectionMultiplexer.GetSubscriber().PublishAsync("key.changed", Environment.MachineName + "\t" + key);
 			logger.LogDebug("Redis cache set {key}", key);
 			return true;
 		});
@@ -205,9 +200,6 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 
 	/// <inheritdoc />
 	public event Action<string>? KeyChanged;
-
-	/// <inheritdoc />
-	public bool PublishKeyChangedEventsBackToThisMachine { get; set; }
 
 	private async Task<T?> PerformOperation<T>(Func<Task<T>> operation)
 	{
@@ -243,18 +235,24 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 	{
 		try
 		{
+			const string keyspace = "__keyspace@0__:";
 			var queue = changeQueue;
 			changeQueue = null;
-			queue?.Unsubscribe();
-			queue = connectionMultiplexer.GetSubscriber().Subscribe("key.changed");
-			queue.OnMessage(msg =>
+			queue?.UnsubscribeAll();
+			var namespaceForSubscribe = $"{keyspace}{keyPrefix}*";
+			var namespaceForSubscribeFlushAll = $"{keyspace}__flushall__*";
+			queue = connectionMultiplexer.GetSubscriber();
+			queue.Subscribe(namespaceForSubscribe, (channel, value) =>
 			{
-				string message = msg.Message.ToString();
-				string[] pieces = message.Split('\t');
-				if (pieces.Length == 2 && (PublishKeyChangedEventsBackToThisMachine || pieces[0] != Environment.MachineName))
+				string key = channel.ToString()[keyspace.Length..];
+				KeyChanged?.Invoke(key);
+			});
+			queue.Subscribe(namespaceForSubscribeFlushAll, (channel, value) =>
+			{
+				if (value == "set")
 				{
-					logger.LogDebug("Redis cache key change {message}", message);
-					KeyChanged?.Invoke(msg.Message);
+					string key = channel.ToString()[keyspace.Length..];
+					KeyChanged?.Invoke(key);
 				}
 			});
 			changeQueue = queue;
@@ -324,6 +322,17 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 			await Task.Delay(10000, stoppingToken);
 		}
 	}
+}
+
+/// <summary>
+/// Distributed redis cache options
+/// </summary>
+public sealed class DistributedRedisCacheOptions
+{
+	/// <summary>
+	/// Key prefix
+	/// </summary>
+	public string KeyPrefix { get; set; } = string.Empty;
 }
 
 /// <summary>

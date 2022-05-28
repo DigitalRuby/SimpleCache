@@ -349,7 +349,14 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 	private void DistributedCacheKeyChanged(string key)
 	{
-		if (key.StartsWith(keyPrefix))
+		// magic key to indicate a flush all operation
+		if (key.Contains("__flushall__"))
+		{
+			logger.LogWarning("Received a flush all command, purging memory and file cache");
+			(memoryCache as MemoryCache)?.Compact(1.0);
+			fileCache.ClearAsync().GetAwaiter(); // this can run in the background
+		}
+		else if (key.StartsWith(keyPrefix))
 		{
 			memoryCache.Remove(key);
 			fileCache.RemoveAsync(key).GetAwaiter().GetResult();

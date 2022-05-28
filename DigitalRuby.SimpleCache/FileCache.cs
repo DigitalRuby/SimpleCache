@@ -111,6 +111,12 @@ public interface IFileCache
 	/// <exception cref="NullReferenceException">Key is null</exception>
 	/// <remarks>Ensure the the type parameter is the exact type that you used to add the item to the cache</remarks>
 	Task RemoveAsync(string key, CancellationToken cancelToken = default);
+
+	/// <summary>
+	/// Remove all cache items
+	/// </summary>
+	/// <returns>Task</returns>
+	Task ClearAsync();
 }
 
 /// <summary>
@@ -140,6 +146,9 @@ public sealed class NullFileCache : IFileCache
     {
 		return Task.CompletedTask;
     }
+
+	/// <inheritdoc />
+	public Task ClearAsync() => Task.CompletedTask;
 }
 
 /// <summary>
@@ -189,6 +198,13 @@ public sealed class MemoryFileCache : IFileCache
 		items[key] = new FileCacheItem<byte[]>(clock.UtcNow + cacheParameters.Duration, bytes);
 		return Task.CompletedTask;
     }
+
+	/// <inheritdoc />
+	public Task ClearAsync()
+	{
+		items.Clear();
+		return Task.CompletedTask;
+	}
 }
 
 /// <inheritdoc />
@@ -204,6 +220,8 @@ public sealed class FileCache : BackgroundService, IFileCache
 
 	private readonly string baseDir;
 	private readonly double freeSpaceThreshold;
+
+	private bool directoryLocked;
 
 	/// <summary>
 	/// Serializer
@@ -260,9 +278,14 @@ public sealed class FileCache : BackgroundService, IFileCache
 	}
 
 	/// <inheritdoc />
-	public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
+	public async Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
+
+		while (directoryLocked)
+		{
+			await Task.Delay(cleanupLoopDelay, cancelToken);
+		}
 
 		string fileName = GetHashFileName(key);
 		using var keyLock = keyLocker.Lock(fileName);
@@ -272,7 +295,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 			if (!File.Exists(fileName))
 			{
 				logger.LogDebug("File cache miss {key}, {fileName}", key, fileName);
-				return Task.FromResult<FileCacheItem<T>?>(default);
+				return default;
 			}
 			using FileStream readerStream = new(fileName, FileMode.Open, FileAccess.Read, FileShare.None);
 			using BinaryReader reader = new(readerStream);
@@ -291,7 +314,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 				{
 					logger.LogError(ex, "Error removing expired file cache {key}, {fileName}", key, fileName);
 				}
-				return Task.FromResult<FileCacheItem<T>?>(default);
+				return default;
 			}
 			else
 			{
@@ -309,7 +332,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 				}
 				var result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item);
 				logger.LogDebug("File cache hit {key}, {fileName}", key, fileName);
-				return Task.FromResult<FileCacheItem<T>?>(result);
+				return result;
 			}
 		}
 		catch (Exception ex)
@@ -325,14 +348,19 @@ public sealed class FileCache : BackgroundService, IFileCache
 			{
 				logger.LogError(ex2, "Error removing corrupted cache file {fileName}", fileName);
 			}
-			return Task.FromResult<FileCacheItem<T>?>(default);
+			return default;
 		}
 	}
 
 	/// <inheritdoc />
-	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
+	public async Task RemoveAsync(string key, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
+
+		while (directoryLocked)
+		{
+			await Task.Delay(cleanupLoopDelay, cancelToken);
+		}
 
 		string fileName = GetHashFileName(key);
 		using var keyLock = keyLocker.Lock(fileName);
@@ -353,13 +381,17 @@ public sealed class FileCache : BackgroundService, IFileCache
 		{
 			logger.LogError(ex, "Error removing existing cache file {key}, {fileName}", key, fileName);
 		}
-		return Task.CompletedTask;
 	}
 
 	/// <inheritdoc />
-	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+	public async Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(key, nameof(key));
+
+		while (directoryLocked)
+		{
+			await Task.Delay(cleanupLoopDelay, cancelToken);
+		}
 
 		string fileName = GetHashFileName(key);
 		using var keyLock = keyLocker.Lock(fileName);
@@ -382,7 +414,27 @@ public sealed class FileCache : BackgroundService, IFileCache
 		{
 			logger.LogError(ex, "Error setting cache file {key}, {fileName}", key, fileName);
 		}
-		return Task.CompletedTask;
+	}
+
+	/// <inheritdoc />
+	public async Task ClearAsync()
+	{
+		// give us 10 seconds to nuke the directory
+		directoryLocked = true;
+		for (int i = 0; i <= 10; i++)
+		{
+			try
+			{
+				Directory.Delete(baseDir, true);
+				Directory.CreateDirectory(baseDir);
+				break;
+			}
+			catch
+			{
+				await Task.Delay(1000);
+			}
+		}
+		directoryLocked = false;
 	}
 
 	/// <summary>
