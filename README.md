@@ -6,7 +6,7 @@ Simple cache has three layers to give you maximum performance:
 
 - RAM. You can specify the maximum amount of memory to use for cache.
 - Disk. You can specify at what free space percentage to start cleaning up cache files on disk. You can turn off the disk cache if desired, recommended if not running on SSD. Why not take advantage of that free disk space being wasted on your servers?
-- Redis. The third and final layer of simple cache is redis, leveraging the StackExchange.Redis nuget package. Key change notifications ensure cache keys are purged if a key is changed on another machine. Run `CONFIG SET notify-keyspace-events KEs` on your redis servers for this to take effect. Simple cache will attempt to do this as well.
+- Redis. The third and final layer of simple cache is redis, leveraging the StackExchange.Redis nuget package. Key change notifications ensure cache keys are purged if a key is changed on another machine. Run `CONFIG SET notify-keyspace-events KEA` on your redis servers for this to take effect. Simple cache will attempt to do this as well.
 
 Simple cache also has cache storm prevention built in, use the `GetOrCreateAsync` method.
 
