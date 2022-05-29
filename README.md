@@ -91,11 +91,11 @@ public interface ILayeredCache : IDisposable
     /// </summary>
     /// <typeparam name="T">Type of item</typeparam>
     /// <param name="key">Cache key</param>
-    /// <param name="cacheParam">Cache parameters. Passing the size is recommended and you can do this with a tuple: (TimeSpan expiration, int size)</param>
-    /// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.</param>
+    /// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.<br/>
+    /// Inside your factory, you should set the CacheParameters on the GetOrCreateAsyncContext to a duration and size tuple: (TimeSpan duration, int size)</param>
     /// <param name="cancelToken">Cancel token</param>
     /// <returns>Task of return of type T</returns>
-    Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
+    Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default);
 
     /// <summary>
     /// Attempts to retrieve value of T by key.
@@ -135,6 +135,22 @@ Cache keys are also prefixed by the entry assembly name by default. This can be 
 The `CacheParameters` struct can be simplified by just passing a `TimeSpan` if you don't know the size. You can also pass a tuple of `(TimeSpan, int)` for a duration, size pair.
 
 If you do know the approximate size of your object, you should specify the size to assist the memory compaction background task to be more accurate.
+
+`GetOrCreateAsync` example:
+
+```cs
+TimeSpan duration = TimeSpan.FromSeconds(60.0);
+var result = await cache.GetOrCreateAsync<string>(key, duration, async context =>
+{
+    // if your method returns a Task<T> here, you don't have to await if you are just forwarding a method call
+    var value = await MyExpensiveFunctionThatReturnsAStringAsync(key);
+
+    // set the cache duration and size, this is an important step to not miss
+    context.CacheParameters = (TimeSpan.FromSeconds(30.0), value.Length * 2);
+
+    // the context also has a CancelToken property if you need it
+}, stoppingToken);
+```
 
 ## Serialization
 

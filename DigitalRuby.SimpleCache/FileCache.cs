@@ -11,10 +11,12 @@ public sealed class FileCacheItem<T>
 	/// </summary>
 	/// <param name="expires">Expires</param>
 	/// <param name="item">Item</param>
-	public FileCacheItem(DateTimeOffset expires, T item)
+	/// <param name="size">Size on disk</param>
+	public FileCacheItem(DateTimeOffset expires, T item, int size)
 	{
 		Expires = expires;
 		Item = item;
+		Size = size;
 	}
 
 	/// <summary>
@@ -26,6 +28,11 @@ public sealed class FileCacheItem<T>
 	/// Item
 	/// </summary>
 	public T Item { get; }
+
+	/// <summary>
+	/// Size on disk
+	/// </summary>
+	public int Size { get; }
 }
 
 /// <summary>
@@ -179,7 +186,7 @@ public sealed class MemoryFileCache : IFileCache
 			{
 				return Task.FromResult<FileCacheItem<T>?>(null);
 			}
-			return Task.FromResult<FileCacheItem<T>?>(new FileCacheItem<T>(item.Expires, value));
+			return Task.FromResult<FileCacheItem<T>?>(new FileCacheItem<T>(item.Expires, value, item.Size));
 		}
 		return Task.FromResult<FileCacheItem<T>?>(null);
     }
@@ -195,7 +202,7 @@ public sealed class MemoryFileCache : IFileCache
 	public Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
     {
 		var bytes = (value is byte[] alreadyBytes ? alreadyBytes : serializer.Serialize(value) ?? throw new IOException("Serialize failed for key " + key));
-		items[key] = new FileCacheItem<byte[]>(clock.UtcNow + cacheParameters.Duration, bytes);
+		items[key] = new FileCacheItem<byte[]>(clock.UtcNow + cacheParameters.Duration, bytes, bytes.Length);
 		return Task.CompletedTask;
     }
 
@@ -330,7 +337,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 				{
 					throw new IOException("Corrupt cache file " + fileName);
 				}
-				var result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item);
+				var result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item, size);
 				logger.LogDebug("File cache hit {key}, {fileName}", key, fileName);
 				return result;
 			}

@@ -148,5 +148,5 @@ public struct CacheParameters
 	/// <summary>
 	/// The estimated size, in bytes, of the cached object. Default is 128. Ignored for some cache like distributed caches.
 	/// </summary>
-	public int Size { get; private set; }
+	public int Size { get; set; }
 }

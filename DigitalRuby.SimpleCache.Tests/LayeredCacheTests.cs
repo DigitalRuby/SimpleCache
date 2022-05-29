@@ -38,13 +38,13 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
             tasks.Add(Task.Run(async () =>
             {
                 await AsTask(evt);
-                await layeredCache.GetOrCreateAsync<string>(testKey, TimeSpan.FromMinutes(1.0),
-                    async cancelToken =>
-                    {
-                        await Task.Delay(100, cancelToken);
-                        Interlocked.Increment(ref cacheMiss);
-                        return testValue;
-                    });
+                await layeredCache.GetOrCreateAsync<string>(testKey, async context =>
+                {
+                    await Task.Delay(100, context.CancelToken);
+                    context.CacheParameters = TimeSpan.FromMinutes(1.0);
+                    Interlocked.Increment(ref cacheMiss);
+                    return testValue;
+                });
             }));
         }
         await Task.Delay(100); // give time to wait
@@ -66,14 +66,20 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     public async Task TestGetOrCreate()
     {
         // add one key
-        await layeredCache.GetOrCreateAsync<string>(testKey, expire,
-            cancelToken => Task.FromResult<string>(testValue));
+        await layeredCache.GetOrCreateAsync<string>(testKey, context =>
+        {
+            context.CacheParameters = expire;
+            return Task.FromResult<string>(testValue);
+        });
         var foundValue = await layeredCache.GetAsync<string>(testKey);
         Assert.That(foundValue, Is.EqualTo(testValue));
 
         // add different key
-        await layeredCache.GetOrCreateAsync<string>(testKey2, expire,
-            cancelToken => Task.FromResult<string>(testValue2));
+        await layeredCache.GetOrCreateAsync<string>(testKey2, context =>
+        {
+            context.CacheParameters = expire;
+            return Task.FromResult<string>(testValue2);
+        });
 
         // keys should exist with different values
         foundValue = await layeredCache.GetAsync<string>(testKey);
@@ -167,8 +173,9 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     {
         Assert.ThrowsAsync<ApplicationException>(() =>
         {
-            return layeredCache.GetOrCreateAsync<string>(testKey, TimeSpan.FromSeconds(30.0), token =>
+            return layeredCache.GetOrCreateAsync<string>(testKey, context =>
             {
+                context.CacheParameters = TimeSpan.FromSeconds(30.0);
                 throw new ApplicationException();
             });
         });

@@ -25,8 +25,9 @@ public sealed class CacheTestService : BackgroundService
         const string value = "TEST RESULT";
         TimeSpan duration = TimeSpan.FromMinutes(5.0);
 
-        var result = await cache.GetOrCreateAsync<string>(key, duration, token =>
+        var result = await cache.GetOrCreateAsync<string>(key, context =>
         {
+            context.CacheParameters = duration;
             return Task.FromResult<string>(value);
         }, stoppingToken);
         logger.LogWarning("Cache get or create: {result}", result);

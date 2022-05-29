@@ -11,11 +11,11 @@ public interface ILayeredCache : IDisposable
 	/// </summary>
 	/// <typeparam name="T">Type of item</typeparam>
 	/// <param name="key">Cache key</param>
-	/// <param name="cacheParam">Cache parameters. Passing the size is recommended and you can do this with a tuple: (TimeSpan expiration, int size)</param>
-	/// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.</param>
+	/// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.<br/>
+	/// Inside your factory, you should set the CacheParameters on the GetOrCreateAsyncContext to a duration and size tuple: (TimeSpan duration, int size)</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task of return of type T</returns>
-	Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
+	Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to retrieve value of T by key.
@@ -62,8 +62,8 @@ public sealed class NullLayeredCache : ILayeredCache
 	public Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default) => Task.FromResult<T?>(default);
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default) =>
-		factory(cancelToken);
+	public Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default) =>
+		factory(new GetOrCreateAsyncContext(cancelToken));
 
 	/// <inheritdoc />
 	public Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default) => Task.CompletedTask;
@@ -243,14 +243,15 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	}
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default)
+	public Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default)
 	{
 		ValidateType<T>();
 
 		key = FormatKey<T>(key);
 
-		var pollyContext = new Context(key, new Dictionary<string, object> { { "CacheParam", cacheParam } });
-		return cachePolicy.ExecuteAsync((ctx, cancelToken) => factory(cancelToken), pollyContext, cancelToken);
+		var ctx = new GetOrCreateAsyncContext(cancelToken); 
+		var pollyContext = new Context(key, new Dictionary<string, object> { { "Context", ctx } });
+		return cachePolicy.ExecuteAsync((pollyContext, cancelToken) => factory(ctx), pollyContext, cancelToken);
 	}
 
 	/// <summary>
@@ -269,24 +270,21 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	{
 		// get the cache key
 		string key = context.OperationKey;
+		var getOrCreateContext = context["Context"] as GetOrCreateAsyncContext ??
+			throw new ArgumentException("Context was not passed to polly correctly");
 		logger.LogDebug("Layered cache get or create {key}", key);
 
 		return memoryCache.GetOrCreateAsync<T>(key, async entry =>
 		{
 			logger.LogDebug("Memory cache get or create miss {key}", key);
 
-			if (!context.TryGetValue("CacheParam", out var value) ||
-				value is not CacheParameters cacheParam)
-			{
-				throw new ArgumentException("Invalid CacheParam key in cache context");
-			}
-			entry.Size = cacheParam.Size;
-			entry.AbsoluteExpirationRelativeToNow = cacheParam.Duration;
-
 			// check file cache (L2)
 			var fileItem = await fileCache.GetAsync<T>(key, cancellationToken);
 			if (fileItem is not null)
 			{
+				// set the size and expiration
+				entry.Size = fileItem.Size * 2;
+				entry.AbsoluteExpiration = fileItem.Expires;
 				return fileItem.Item;
 			}
 
@@ -299,12 +297,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 					logger.LogDebug("Get or create {key} in distributed cache", key);
 
 					// grabbed from distributed cache, use that value and don't invoke the factory
-					entry.AbsoluteExpirationRelativeToNow = distributedCacheItem.Expiry;
 					var result = DeserializeObject<T>(distributedCacheItem.Bytes);
 					if (result is null)
 					{
 						throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
 					}
+					entry.Size = distributedCacheItem.Bytes.Length * 2;
+					entry.AbsoluteExpirationRelativeToNow = distributedCacheItem.Expiry;
 					return result;
 				}
 			}
@@ -318,11 +317,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 			// get the item from the factory
 			var item = await factory(context, cancellationToken);
+			entry.Size = getOrCreateContext.CacheParameters.Size;
+			entry.AbsoluteExpirationRelativeToNow = getOrCreateContext.CacheParameters.Duration;
 			var distributedCacheBytes = SerializeObject(item);
 
 			// L2 cache (file)
 			// file cache can take raw bytes and will not additional serialization on them
-			await fileCache.SetAsync(key, distributedCacheBytes, cacheParam.Duration);
+			await fileCache.SetAsync(key, distributedCacheBytes, getOrCreateContext.CacheParameters.Duration);
 
 			// L3 cache (redis)
 			try
@@ -332,7 +333,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 					return distributedCache.SetAsync(key, new DistributedCacheItem
 					{
 						Bytes = distributedCacheBytes,
-						Expiry = cacheParam.Duration
+						Expiry = getOrCreateContext.CacheParameters.Duration
 					});
 				});
 			}
@@ -403,4 +404,29 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 			throw new InvalidOperationException("Primitives cannot be cached");
 		}
 	}
+}
+
+/// <summary>
+/// Context for GetOrCreateAsync
+/// </summary>
+public class GetOrCreateAsyncContext
+{
+	/// <summary>
+	/// Constructor
+	/// </summary>
+	/// <param name="cancelToken">Cancel token</param>
+	public GetOrCreateAsyncContext(CancellationToken cancelToken)
+	{
+		CancelToken = cancelToken;
+	}
+
+	/// <summary>
+	/// Cache parameters. You can set these to a new value for duration and size inside the factory method
+	/// </summary>
+	public CacheParameters CacheParameters { get; set; }
+
+	/// <summary>
+	/// Cancellation token
+	/// </summary>
+	public CancellationToken CancelToken { get; }
 }

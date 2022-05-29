@@ -6,7 +6,7 @@
 		<Nullable>enable</Nullable>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<IsPackable>true</IsPackable>
-		<Version>1.0.3</Version>
+		<Version>1.0.4</Version>
 		<Title>Simple Cache</Title>
 		<Authors>jjxtra</Authors>
 		<Company>Digital Ruby, LLC</Company>
@@ -17,7 +17,7 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/DigitalRuby/SimplePubSub</RepositoryUrl>
 		<PackageTags>cache;simple;easy;ram;memory;file;disk;redis;distributed;idistributedcache;iconnectionmultiplexer;lock;distributedlock;stackexchange;stackoverflow;connectionmultiplexer;lazy;task;storm;lazycache;caching;invalidation;expiration;synchronization;powerful;layer;layers;layered;layeredcache</PackageTags>
-		<PackageReleaseNotes>Make redis connection string optional, leave empty to not use redis</PackageReleaseNotes>
+		<PackageReleaseNotes>Change GetOrCreateAsync to pass a context to the factory so that size or other properties can be set inside the factory</PackageReleaseNotes>
 		<AssemblyVersion></AssemblyVersion>
 		<FileVersion></FileVersion>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
