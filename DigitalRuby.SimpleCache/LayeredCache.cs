@@ -429,4 +429,22 @@ public class GetOrCreateAsyncContext
 	/// Cancellation token
 	/// </summary>
 	public CancellationToken CancelToken { get; }
+
+	/// <summary>
+	/// Get/set duration on the cache parameters
+	/// </summary>
+	public TimeSpan Duration
+	{
+		get => CacheParameters.Duration;
+		set => CacheParameters = new(value, CacheParameters.Size);
+	}
+
+	/// <summary>
+	/// Get/set size on the cache parameters
+	/// </summary>
+	public int Size
+	{
+		get => CacheParameters.Size;
+		set => CacheParameters = new(CacheParameters.Duration, value);
+	}
 }

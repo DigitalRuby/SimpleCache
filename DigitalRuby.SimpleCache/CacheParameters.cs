@@ -109,31 +109,43 @@ public struct CacheParameters
 	/// Implicit operator of cache parameters to tuple
 	/// </summary>
 	/// <param name="value">Value</param>
-	public static implicit operator ValueTuple<TimeSpan, int>(in CacheParameters value) => new(value.Duration, value.Size);
+	public static implicit operator ValueTuple<TimeSpan, int>(CacheParameters value) => new(value.Duration, value.Size);
 
 	/// <summary>
-	/// Implicit operator of int seconds to cache parameters
+	/// Implicit operator of int minutes to cache parameters
 	/// </summary>
-	/// <param name="seconds">Seconds to cache</param>
-	public static implicit operator CacheParameters(in int seconds) => new(TimeSpan.FromSeconds(seconds), DefaultSize);
+	/// <param name="minutes">Minutes to cache</param>
+	public static implicit operator CacheParameters(int minutes) => new(TimeSpan.FromMinutes(minutes), DefaultSize);
 
 	/// <summary>
 	/// Implicit operator of TimeSpan to cache parameters
 	/// </summary>
 	/// <param name="timespan">Timespan</param>
-	public static implicit operator CacheParameters(in TimeSpan timespan) => new(timespan, DefaultSize);
+	public static implicit operator CacheParameters(TimeSpan timespan) => new(timespan, DefaultSize);
 
 	/// <summary>
 	/// Implicit operator of tuple of timespan, int size to cache parameters
 	/// </summary>
 	/// <param name="tuple">Value</param>
-	public static implicit operator CacheParameters(in ValueTuple<TimeSpan, int> tuple) => new(tuple.Item1, tuple.Item2);
+	public static implicit operator CacheParameters(ValueTuple<TimeSpan, int> tuple) => new(tuple.Item1, tuple.Item2);
 
 	/// <summary>
-	/// Implicit operator of tuple of int seconds, int size to cache parameters
+	/// Implicit operator of tuple of int minutes, int size to cache parameters
 	/// </summary>
 	/// <param name="tuple">Value</param>
-	public static implicit operator CacheParameters(in ValueTuple<int, int> tuple) => new(TimeSpan.FromSeconds(tuple.Item1), tuple.Item2);
+	public static implicit operator CacheParameters(ValueTuple<int, int> tuple) => new(TimeSpan.FromMinutes(tuple.Item1), tuple.Item2);
+
+	/// <summary>
+	/// Implicit operator of tuple of float minutes, int size to cache parameters
+	/// </summary>
+	/// <param name="tuple">Value</param>
+	public static implicit operator CacheParameters(ValueTuple<float, int> tuple) => new(TimeSpan.FromMinutes(tuple.Item1), tuple.Item2);
+
+	/// <summary>
+	/// Implicit operator of tuple of double minutes, int size to cache parameters
+	/// </summary>
+	/// <param name="tuple">Value</param>
+	public static implicit operator CacheParameters(ValueTuple<double, int> tuple) => new(TimeSpan.FromMinutes(tuple.Item1), tuple.Item2);
 
 	/// <summary>
 	/// Default cache parameters
