@@ -6,7 +6,7 @@
 		<Nullable>enable</Nullable>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<IsPackable>true</IsPackable>
-		<Version>1.0.1</Version>
+		<Version>1.0.2</Version>
 		<Title>Simple Cache</Title>
 		<Authors>jjxtra</Authors>
 		<Company>Digital Ruby, LLC</Company>

@@ -61,120 +61,14 @@ public static class ServicesExtensions
     /// <param name="configuration">Configuration</param>
     public static void AddSimpleCache(this IServiceCollection services, SimpleCacheConfiguration configuration)
     {
-        // assign configuration defaults
         SetConfigurationDefaults(configuration);
-
-        // add layer cache options
-        var layerCacheOptions = new LayeredCacheOptions
-        {
-            KeyPrefix = configuration.KeyPrefix
-        };
-        services.AddSingleton(layerCacheOptions);
-
-        // add file cache options
-        var fileOptions = new FileCacheOptions
-        {
-            CacheDirectory = configuration.FileCacheDirectory,
-            FreeSpaceThreshold = configuration.FileCacheFreeSpaceThreshold
-        };
-        services.AddSingleton(fileOptions);
-
-        // add redis cache options
-        var redisOptions = new DistributedRedisCacheOptions
-        {
-            KeyPrefix = layerCacheOptions.KeyPrefix
-        };
-        services.AddSingleton(redisOptions);
-
-        // a little hacky because of poor api design around AddStackExchangeRedisCache not exposing IServiceProvider
-        Resolver resolver = new();
-        services.AddSingleton(resolver);
-        services.AddHostedService<SimpleCacheHelperService>(); // transfers IServiceProvider to resolver
-
-        // setup stackexchange redis
-        var stackExchangeRedisOptions = ConfigurationOptions.Parse(configuration.RedisConnectionString);
-        stackExchangeRedisOptions.AbortOnConnectFail = false; // can connect later if initial connection fails
-
-        // add our own system clock
-        services.AddSingleton<ClockHandler>();
-        services.AddSingleton<IClockHandler>(provider => provider.GetRequiredService<ClockHandler>());
-        services.Replace(new ServiceDescriptor(typeof(ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
-
-        // add stack exchange redis
-        services.AddSingleton<IConnectionMultiplexer>(provider =>
-        {
-            try
-            {
-                stackExchangeRedisOptions.AllowAdmin = true;
-                using var admin = ConnectionMultiplexer.Connect(stackExchangeRedisOptions);
-                var existing = admin.GetServer(admin.GetEndPoints().Single()).ConfigGet("notify-keyspace-events");
-                if (existing is null ||
-                    existing.Length == 0 ||
-                    !existing.Any(kv =>
-                    {
-                        var v = kv.Value ?? string.Empty;
-                        return v.Contains('K', StringComparison.OrdinalIgnoreCase) &&
-                        v.Contains('E', StringComparison.OrdinalIgnoreCase) &&
-                        v.Contains('A', StringComparison.OrdinalIgnoreCase);
-                    }))
-                {
-                    admin.GetServer(admin.GetEndPoints().Single()).ConfigSet("notify-keyspace-events", "KEA");
-                }
-            }
-            catch
-            {
-                var logger = provider.GetRequiredService<ILogger<DistributedRedisCache>>();
-                const string keySpaceCommand = "CONFIG SET notify-keyspace-events KEA";
-                logger.LogError($"Connection multiplexer has failed to enable key space events, you must manually run this command on your redis servers: '{keySpaceCommand}'");
-            }
-            stackExchangeRedisOptions.AllowAdmin = false;
-            return ConnectionMultiplexer.Connect(stackExchangeRedisOptions);
-        });
-        services.AddStackExchangeRedisCache(cfg =>
-        {
-            cfg.ConnectionMultiplexerFactory = () => Task.FromResult<IConnectionMultiplexer>(resolver.Provider!.GetRequiredService<IConnectionMultiplexer>());
-        });
-
-        // add memory cache
-        // another deficiency in the .NET api here, we need the provider to pull out the correct system clock
-        // in case it has been replaced
-        // the add memory cache extension method is not sufficient
-        services.AddSingleton<MemoryCache>(provider => new MemoryCache(new MemoryOptionsProvider(new MemoryCacheOptions
-        {
-            // set size limit in bytes
-            SizeLimit = configuration.MaxMemorySize * 1024 * 1024,
-            ExpirationScanFrequency = TimeSpan.FromSeconds(10.0),
-            CompactionPercentage = 0.5,
-            Clock = provider.GetRequiredService<ISystemClock>()
-        })));
-        services.AddSingleton<IMemoryCache>(provider => provider.GetRequiredService<MemoryCache>());
-
-        // add serializer
+        var layerCacheOptions = AddLayerCacheOptions(services, configuration);
+        AddSystemClock(services);
+        AddMemoryCache(services, configuration);
+        AddFileCache(services, configuration);
+        AddDistributedCache(services, configuration, layerCacheOptions);
         services.AddSingleton<ISerializer>(configuration.SerializerObject);
-
-        // add disk space checker
         services.AddSingleton<IDiskSpace, DiskSpace>();
-
-        // add file cache
-        bool useRealFileCache = !string.IsNullOrWhiteSpace(configuration.FileCacheDirectory);
-        if (useRealFileCache)
-        {
-            services.AddSingleton<FileCache>();
-            services.AddHostedService(provider => provider.GetRequiredService<FileCache>());
-            services.AddSingleton<IFileCache>(provider => provider.GetRequiredService<FileCache>());
-        }
-        else
-        {
-            services.AddSingleton<IFileCache>(new NullFileCache());
-        }
-
-        // add redis cache
-        services.AddSingleton<DistributedRedisCache>();
-        services.AddHostedService(provider => provider.GetRequiredService<DistributedRedisCache>());
-        services.AddSingleton<IDistributedCache>(provider => provider.GetRequiredService<DistributedRedisCache>());
-        services.AddSingleton<IDistributedLockFactory>(provider => provider.GetRequiredService<DistributedRedisCache>());
-
-        // finally, add the layered cache interface
         services.AddSingleton<ILayeredCache, LayeredCache>();
     }
 
@@ -195,6 +89,134 @@ public static class ServicesExtensions
             }
         }
         configuration.SerializerObject ??= new JsonLZ4Serializer();
+    }
+
+    private static LayeredCacheOptions AddLayerCacheOptions(IServiceCollection services, SimpleCacheConfiguration configuration)
+    {
+        // add layer cache options
+        var layerCacheOptions = new LayeredCacheOptions
+        {
+            KeyPrefix = configuration.KeyPrefix
+        };
+        services.AddSingleton(layerCacheOptions);
+        return layerCacheOptions;
+    }
+
+    private static void AddSystemClock(IServiceCollection services)
+    {
+        // add our own system clock
+        services.AddSingleton<ClockHandler>();
+        services.AddSingleton<IClockHandler>(provider => provider.GetRequiredService<ClockHandler>());
+        services.Replace(new ServiceDescriptor(typeof(ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
+    }
+
+    private static void AddDistributedCache(IServiceCollection services,
+        SimpleCacheConfiguration configuration,
+        LayeredCacheOptions layerCacheOptions)
+    {
+        if (string.IsNullOrWhiteSpace(configuration.RedisConnectionString))
+        {
+            // add null distributed cache
+            services.AddSingleton<IDistributedCache>(new NullDistributedCache());
+        }
+        else
+        {
+            // add redis cache options
+            var redisOptions = new DistributedRedisCacheOptions
+            {
+                KeyPrefix = layerCacheOptions.KeyPrefix
+            };
+            services.AddSingleton(redisOptions);
+
+            // a little hacky because of poor api design around AddStackExchangeRedisCache not exposing IServiceProvider
+            Resolver resolver = new();
+            services.AddSingleton(resolver);
+            services.AddHostedService<SimpleCacheHelperService>(); // transfers IServiceProvider to resolver
+
+            // setup stackexchange redis
+            var stackExchangeRedisOptions = ConfigurationOptions.Parse(configuration.RedisConnectionString);
+            stackExchangeRedisOptions.AbortOnConnectFail = false; // can connect later if initial connection fails
+            services.AddSingleton<IConnectionMultiplexer>(provider =>
+            {
+                try
+                {
+                    stackExchangeRedisOptions.AllowAdmin = true;
+                    using var admin = ConnectionMultiplexer.Connect(stackExchangeRedisOptions);
+                    var existing = admin.GetServer(admin.GetEndPoints().Single()).ConfigGet("notify-keyspace-events");
+                    if (existing is null ||
+                        existing.Length == 0 ||
+                        !existing.Any(kv =>
+                        {
+                            // this seems to be a random order
+                            var v = kv.Value ?? string.Empty;
+                            return v.Contains('K', StringComparison.OrdinalIgnoreCase) &&
+                            v.Contains('E', StringComparison.OrdinalIgnoreCase) &&
+                            v.Contains('A', StringComparison.OrdinalIgnoreCase);
+                        }))
+                    {
+                        admin.GetServer(admin.GetEndPoints().Single()).ConfigSet("notify-keyspace-events", "KEA");
+                    }
+                }
+                catch
+                {
+                    var logger = provider.GetRequiredService<ILogger<DistributedRedisCache>>();
+                    const string keySpaceCommand = "CONFIG SET notify-keyspace-events KEA";
+                    logger.LogError($"Connection multiplexer has failed to enable key space events, you must manually run this command on your redis servers: '{keySpaceCommand}'");
+                }
+                stackExchangeRedisOptions.AllowAdmin = false;
+                return ConnectionMultiplexer.Connect(stackExchangeRedisOptions);
+            });
+            services.AddStackExchangeRedisCache(cfg =>
+            {
+                cfg.ConnectionMultiplexerFactory = () => Task.FromResult<IConnectionMultiplexer>(resolver.Provider!.GetRequiredService<IConnectionMultiplexer>());
+            });
+
+            // add redis cache
+            services.AddSingleton<DistributedRedisCache>();
+            services.AddHostedService(provider => provider.GetRequiredService<DistributedRedisCache>());
+            services.AddSingleton<IDistributedCache>(provider => provider.GetRequiredService<DistributedRedisCache>());
+            services.AddSingleton<IDistributedLockFactory>(provider => provider.GetRequiredService<DistributedRedisCache>());
+        }
+    }
+
+    private static void AddMemoryCache(IServiceCollection services, SimpleCacheConfiguration configuration)
+    {
+        // add memory cache
+        // another deficiency in the .NET api here, we need the provider to pull out the correct system clock
+        // in case it has been replaced
+        // the add memory cache extension method is not sufficient
+        services.AddSingleton<MemoryCache>(provider => new MemoryCache(new MemoryOptionsProvider(new MemoryCacheOptions
+        {
+            // set size limit in bytes
+            SizeLimit = configuration.MaxMemorySize * 1024 * 1024,
+            ExpirationScanFrequency = TimeSpan.FromSeconds(10.0),
+            CompactionPercentage = 0.5,
+            Clock = provider.GetRequiredService<ISystemClock>()
+        })));
+        services.AddSingleton<IMemoryCache>(provider => provider.GetRequiredService<MemoryCache>());
+    }
+
+    private static void AddFileCache(IServiceCollection services, SimpleCacheConfiguration configuration)
+    {
+        // add file cache
+        bool useRealFileCache = !string.IsNullOrWhiteSpace(configuration.FileCacheDirectory);
+        if (useRealFileCache)
+        {
+            // add file cache options
+            var fileOptions = new FileCacheOptions
+            {
+                CacheDirectory = configuration.FileCacheDirectory,
+                FreeSpaceThreshold = configuration.FileCacheFreeSpaceThreshold
+            };
+            services.AddSingleton(fileOptions);
+            services.AddSingleton<FileCache>();
+            services.AddHostedService(provider => provider.GetRequiredService<FileCache>());
+            services.AddSingleton<IFileCache>(provider => provider.GetRequiredService<FileCache>());
+        }
+        else
+        {
+            services.AddSingleton<IFileCache>(new NullFileCache());
+        }
     }
 }
 

@@ -43,7 +43,7 @@ The configuration options are:
     /* optional, override max memory size (in megabytes). Default is 1024. */
     "MaxMemorySize": 2048,
 
-    /* redis connection string, required */
+    /* optional redis connection string */
     "RedisConnectionString": "localhost:6379",
 
     /*
@@ -67,7 +67,9 @@ The configuration options are:
 
 ```
 
-Only the `RedisConnectionString` is required. For production usage, you should load this from an environment variable.
+If the `RedisConnectionString` is empty, no redis cache will be used, an no key change notifications will be sent, preventing auto purge of cache values that are modified.
+
+For production usage, you should load this from an environment variable.
 
 ## Usage
 

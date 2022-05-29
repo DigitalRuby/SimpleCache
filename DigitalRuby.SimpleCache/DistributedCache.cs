@@ -60,6 +60,39 @@ public interface IDistributedCache
 }
 
 /// <summary>
+/// Null distributed cache that no-ops everything
+/// </summary>
+public sealed class NullDistributedCache : IDistributedCache, IDistributedLockFactory
+{
+	/// <inheritdoc />
+	public event Action<string>? KeyChanged;
+
+	/// <inheritdoc />
+	public Task DeleteAsync(string key, CancellationToken cancelToken = default)
+    {
+		return Task.CompletedTask;
+    }
+
+	/// <inheritdoc />
+	public Task<DistributedCacheItem> GetAsync(string key, CancellationToken cancelToken = default)
+    {
+		return Task.FromResult<DistributedCacheItem>(new DistributedCacheItem());
+    }
+
+	/// <inheritdoc />
+	public Task SetAsync(string key, DistributedCacheItem item, CancellationToken cancelToken = default)
+    {
+		return Task.CompletedTask;
+    }
+
+	/// <inheritdoc />
+	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default)
+    {
+		return Task.FromResult<IAsyncDisposable?>(new DistributedMemoryCache.FakeDistributedLock());
+    }
+}
+
+/// <summary>
 /// Distributed cache but all in memory (for testing)
 /// </summary>
 public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLockFactory
@@ -68,7 +101,7 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 
 	public DistributedMemoryCache(ISystemClock clock) => this.clock = clock;
 
-	private sealed class FakeDistributedLock : IAsyncDisposable
+	internal sealed class FakeDistributedLock : IAsyncDisposable
     {
         public ValueTask DisposeAsync()
         {
