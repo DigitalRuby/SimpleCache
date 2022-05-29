@@ -2,13 +2,17 @@
 
 SimpleCache removes the headache and pain of getting caching right in .NET.
 
-Simple cache has three layers to give you maximum performance:
-
-- RAM. You can specify the maximum amount of memory to use for cache.
-- Disk. You can specify at what free space percentage to start cleaning up cache files on disk. You can turn off the disk cache if desired, recommended if not running on SSD. Why not take advantage of that free disk space being wasted on your servers?
-- Redis. The third and final layer of simple cache is redis, leveraging the StackExchange.Redis nuget package. Key change notifications ensure cache keys are purged if a key is changed on another machine. Run `CONFIG SET notify-keyspace-events KEA` on your redis servers for this to take effect. Simple cache will attempt to do this as well.
-
-Simple cache also has cache storm prevention built in, use the `GetOrCreateAsync` method.
+**Features**:
+- Simple and intuitive API using generics and tasks.
+- Cache storm prevention using `GetOrCreateAsync`. Your factory is guaranteed to execute only once per key, regardless of how many callers stack on it.
+- Exceptions are not cached.
+- Thread safe.
+- Three layers: RAM, disk and redis. Disk and redis can be disabled if desired.
+- Null and memory versions of both file and redis caches available for mocking.
+- Excellent test coverage.
+- Optimized usage of all your resources. Simple cache has three layers to give you maximum performance: RAM, disk and redis.
+- Built in json-lz4 serializer for file and redis caching for smaller values and minimal implementation pain.
+- You can create your own serializer if you want to use protobuf or other compression options.
 
 ## Setup and Configuration
 
@@ -22,7 +26,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSimpleCache(builder.Configuration);
 
 // you can also create a builder with a strongly typed configuration
-// builder.Services.AddSimpleCache(new SimpleCacheConfiguration
+builder.Services.AddSimpleCache(new SimpleCacheConfiguration
 {
     // fill in values here
 });
@@ -77,17 +81,18 @@ You can inject the following interface into your constructors to use the layered
 
 ```cs
 /// <summary>
-/// Layered cache interface. A layered cache aggregates multiple caches, such as memory, file and distributed cache (redis, etc.).
+/// Layered cache interface. A layered cache aggregates multiple caches, such as memory, file and distributed cache (redis, etc.).<br/>
+/// Internally, keys are prefixed with the entry assembyly name and the type full name. You can change the entry assembly by specifying a KeyPrefix in the configuration.<br/>
 /// </summary>
 public interface ILayeredCache : IDisposable
 {
     /// <summary>
-    /// Get or create an item from the cache. This will lock the key, preventing cache storm.
+    /// Get or create an item from the cache.
     /// </summary>
     /// <typeparam name="T">Type of item</typeparam>
     /// <param name="key">Cache key</param>
-    /// <param name="cacheParam">Cache parameters</param>
-    /// <param name="factory">Factory method if no item is in the cache</param>
+    /// <param name="cacheParam">Cache parameters. Passing the size is recommended and you can do this with a tuple: (TimeSpan expiration, int size)</param>
+    /// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.</param>
     /// <param name="cancelToken">Cancel token</param>
     /// <returns>Task of return of type T</returns>
     Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
@@ -98,7 +103,7 @@ public interface ILayeredCache : IDisposable
     /// <typeparam name="T">Type of object to get</typeparam>
     /// <param name="key">Cache key</param>
     /// <param name="cancelToken">Cancel token</param>
-    /// <returns>Result of null if nothing found with the key</returns>
+    /// <returns>Result of type T or null if nothing found for the key</returns>
     Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default);
 
     /// <summary>
@@ -106,16 +111,16 @@ public interface ILayeredCache : IDisposable
     /// </summary>
     /// <typeparam name="T">Type of object</typeparam>
     /// <param name="key">Cache key to set</param>
-    /// <param name="obj">Object to set</param>
+    /// <param name="value">Value to set</param>
     /// <param name="cacheParam">Cache parameters</param>
     /// <param name="cancelToken">Cancel token</param>
     /// <returns>Task</returns>
-    Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default);
+    Task SetAsync<T>(string key, T value, CacheParameters cacheParam, CancellationToken cancelToken = default);
 
     /// <summary>
     /// Attempts to delete an entry of T type by key. If there is no key found, nothing happens.
     /// </summary>
-    /// <typeparam name="T">The type object object to delete</typeparam>
+    /// <typeparam name="T">The type of object to delete</typeparam>
     /// <param name="key">The key to delete</param>
     /// <param name="cancelToken">Cancel token</param>
     /// <returns>Task</returns>
@@ -150,8 +155,16 @@ public interface ISerializer
     /// </summary>
     /// <param name="bytes">Bytes to deserialize</param>
     /// <param name="type">Type of object to deserialize to</param>
-    /// <returns>Deserialized object or null if failure</returns>
+    /// <returns>Deserialized object or null if bytes is null or empty</returns>
     object? Deserialize(byte[]? bytes, Type type);
+
+    /// <summary>
+    /// Deserialize using generic type parameter
+    /// </summary>
+    /// <typeparam name="T">Type of object to deserialize</typeparam>
+    /// <param name="bytes">Bytes</param>
+    /// <returns>Deserialized object or null if bytes is null or empty</returns>
+    T? Deserialize<T>(byte[]? bytes) => (T?)Deserialize(bytes, typeof(T));
 
     /// <summary>
     /// Serialize an object
@@ -161,7 +174,15 @@ public interface ISerializer
     byte[]? Serialize(object? obj);
 
     /// <summary>
-    /// Get a description for the serializer
+    /// Serialize using generic type parameter
+    /// </summary>
+    /// <typeparam name="T">Type of object</typeparam>
+    /// <param name="obj">Object to serialize</param>
+    /// <returns>Serialized bytes or null if obj is null</returns>
+    byte[]? Serialize<T>(T? obj) => Serialize(obj);
+
+    /// <summary>
+    /// Get a short description for the serializer, i.e. json or json-lz4.
     /// </summary>
     string Description { get; }
 }
@@ -194,6 +215,8 @@ If you are not running on an SSD, it is recommended to disable the file cache by
 The third and final layer, the redis cache uses StackExchange.Redis nuget package.
 
 The redis layer detects when there is a failover and failback in a cluster and handles this gracefully.
+
+Keyspace notifications are sent to keep cache in sync between machines. Run `CONFIG SET notify-keyspace-events KEA` on your redis servers for this to take effect. Simple cache will attempt to do this as well.
 
 Sometimes you need to purge your entire cache, do this with caution. To cause simple cache to clear memory and file caches, set a redis key that equals `__flushall__` with any value, then wait a second then execute a `FLUSHALL` or `FLUSHDB` command.
 

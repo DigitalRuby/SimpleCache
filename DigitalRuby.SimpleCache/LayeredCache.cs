@@ -1,17 +1,18 @@
 ﻿namespace DigitalRuby.SimpleCache;
 
 /// <summary>
-/// Layered cache interface. A layered cache aggregates multiple caches, such as memory, file and distributed cache (redis, etc.).
+/// Layered cache interface. A layered cache aggregates multiple caches, such as memory, file and distributed cache (redis, etc.).<br/>
+/// Internally, keys are prefixed with the entry assembyly name and the type full name. You can change the entry assembly by specifying a KeyPrefix in the configuration.<br/>
 /// </summary>
 public interface ILayeredCache : IDisposable
 {
 	/// <summary>
-	/// Get or create an item from the cache. This will lock the key, preventing cache storm.
+	/// Get or create an item from the cache.
 	/// </summary>
 	/// <typeparam name="T">Type of item</typeparam>
 	/// <param name="key">Cache key</param>
-	/// <param name="cacheParam">Cache parameters</param>
-	/// <param name="factory">Factory method if no item is in the cache</param>
+	/// <param name="cacheParam">Cache parameters. Passing the size is recommended and you can do this with a tuple: (TimeSpan expiration, int size)</param>
+	/// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task of return of type T</returns>
 	Task<T> GetOrCreateAsync<T>(string key, CacheParameters cacheParam, Func<CancellationToken, Task<T>> factory, CancellationToken cancelToken = default);
@@ -22,7 +23,7 @@ public interface ILayeredCache : IDisposable
 	/// <typeparam name="T">Type of object to get</typeparam>
 	/// <param name="key">Cache key</param>
 	/// <param name="cancelToken">Cancel token</param>
-	/// <returns>Result of null if nothing found with the key</returns>
+	/// <returns>Result of type T or null if nothing found for the key</returns>
 	Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default);
 
 	/// <summary>
@@ -30,16 +31,16 @@ public interface ILayeredCache : IDisposable
 	/// </summary>
 	/// <typeparam name="T">Type of object</typeparam>
 	/// <param name="key">Cache key to set</param>
-	/// <param name="obj">Object to set</param>
+	/// <param name="value">Value to set</param>
 	/// <param name="cacheParam">Cache parameters</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
-	Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default);
+	Task SetAsync<T>(string key, T value, CacheParameters cacheParam, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to delete an entry of T type by key. If there is no key found, nothing happens.
 	/// </summary>
-	/// <typeparam name="T">The type object object to delete</typeparam>
+	/// <typeparam name="T">The type of object to delete</typeparam>
 	/// <param name="key">The key to delete</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>

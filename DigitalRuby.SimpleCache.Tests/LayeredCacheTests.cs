@@ -160,6 +160,23 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     }
 
     /// <summary>
+    /// Make sure we don't cache exceptions
+    /// </summary>
+    [Test]
+    public async Task TestException()
+    {
+        Assert.ThrowsAsync<ApplicationException>(() =>
+        {
+            return layeredCache.GetOrCreateAsync<string>(testKey, TimeSpan.FromSeconds(30.0), token =>
+            {
+                throw new ApplicationException();
+            });
+        });
+        var foundValue = await layeredCache.GetAsync<string>(testKey);
+        Assert.That(foundValue, Is.Null);
+    }
+
+    /// <summary>
     /// Convert a wait handle to a task with a timeout. Allow multiple waiters to release on a single manual reset event.
     /// </summary>
     /// <param name="handle">Wait handle</param>
