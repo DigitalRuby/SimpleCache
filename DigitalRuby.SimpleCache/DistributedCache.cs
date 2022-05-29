@@ -64,8 +64,10 @@ public interface IDistributedCache
 /// </summary>
 public sealed class NullDistributedCache : IDistributedCache, IDistributedLockFactory
 {
+#pragma warning disable CS0067 // never used
 	/// <inheritdoc />
 	public event Action<string>? KeyChanged;
+#pragma warning restore
 
 	/// <inheritdoc />
 	public Task DeleteAsync(string key, CancellationToken cancelToken = default)
