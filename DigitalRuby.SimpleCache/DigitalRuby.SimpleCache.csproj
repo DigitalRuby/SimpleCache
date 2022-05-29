@@ -17,7 +17,7 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/DigitalRuby/SimplePubSub</RepositoryUrl>
 		<PackageTags>cache;simple;easy;ram;memory;file;disk;redis;distributed;idistributedcache;iconnectionmultiplexer;lock;distributedlock;stackexchange;stackoverflow;connectionmultiplexer;lazy;task;storm</PackageTags>
-		<PackageReleaseNotes>Skip keyspace registration if it's already on</PackageReleaseNotes>
+		<PackageReleaseNotes>Make redis connection string optional, leave empty to not use redis</PackageReleaseNotes>
 		<AssemblyVersion></AssemblyVersion>
 		<FileVersion></FileVersion>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
