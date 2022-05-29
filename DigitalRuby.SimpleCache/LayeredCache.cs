@@ -63,7 +63,7 @@ public sealed class NullLayeredCache : ILayeredCache
 
 	/// <inheritdoc />
 	public Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default) =>
-		factory(new GetOrCreateAsyncContext(cancelToken));
+		factory(new GetOrCreateAsyncContext(key, cancelToken));
 
 	/// <inheritdoc />
 	public Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default) => Task.CompletedTask;
@@ -249,7 +249,7 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 
 		key = FormatKey<T>(key);
 
-		var ctx = new GetOrCreateAsyncContext(cancelToken); 
+		var ctx = new GetOrCreateAsyncContext(key, cancelToken); 
 		var pollyContext = new Context(key, new Dictionary<string, object> { { "Context", ctx } });
 		return cachePolicy.ExecuteAsync((pollyContext, cancelToken) => factory(ctx), pollyContext, cancelToken);
 	}
@@ -414,11 +414,18 @@ public class GetOrCreateAsyncContext
 	/// <summary>
 	/// Constructor
 	/// </summary>
+	/// <param name="key">Key</param>
 	/// <param name="cancelToken">Cancel token</param>
-	public GetOrCreateAsyncContext(CancellationToken cancelToken)
+	public GetOrCreateAsyncContext(string key, CancellationToken cancelToken)
 	{
+		Key = key;
 		CancelToken = cancelToken;
 	}
+
+	/// <summary>
+	/// Cache key
+	/// </summary>
+	public string Key { get; }
 
 	/// <summary>
 	/// Cache parameters. You can set these to a new value for duration and size inside the factory method

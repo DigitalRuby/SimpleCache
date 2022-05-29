@@ -142,7 +142,8 @@ If you do know the approximate size of your object, you should specify the size 
 var result = await cache.GetOrCreateAsync<string>(key, duration, async context =>
 {
     // if your method returns a Task<T> here, you don't have to await if you are just forwarding a method call
-    var value = await MyExpensiveFunctionThatReturnsAStringAsync(key);
+    // by using the context.Key, you can avoid having to capture the key parameter, saving performance
+    var value = await MyExpensiveFunctionThatReturnsAStringAsync(context.Key);
 
     // set the cache duration and size, this is an important step to not miss
     // the tuple is minutes, size
