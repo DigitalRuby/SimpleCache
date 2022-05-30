@@ -144,7 +144,7 @@ var result = await cache.GetOrCreateAsync<string>(key, duration, async context =
     // if your method returns a Task<T> here, you don't have to await if you are just forwarding a method call
     var value = await MyExpensiveFunctionThatReturnsAStringAsync();
 
-    // if you need the key, you can use context.Key to avoi capturing the key parameter, saving performance
+    // if you need the key, you can use context.Key to avoid capturing the key parameter, saving performance
 
     // set the cache duration and size, this is an important step to not miss
     // the tuple is minutes, size
