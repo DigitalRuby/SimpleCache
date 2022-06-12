@@ -20,7 +20,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         fileCache = new MemoryFileCache(serializer, this);
         distributedCache = new DistributedMemoryCache(this);
         layeredCache = new LayeredCache(new LayeredCacheOptions { KeyPrefix = "test" }, serializer,
-            memoryCache, fileCache, distributedCache, new NullLogger<LayeredCache>());
+            memoryCache, fileCache, distributedCache, this, new NullLogger<LayeredCache>());
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.GetOrCreateAsync<string>(testKey, context =>
         {
             context.CacheParameters = expire;
-            return Task.FromResult<string>(testValue);
+            return Task.FromResult<string?>(testValue);
         });
         var foundValue = await layeredCache.GetAsync<string>(testKey);
         Assert.That(foundValue, Is.EqualTo(testValue));
@@ -78,7 +78,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.GetOrCreateAsync<string>(testKey2, context =>
         {
             context.CacheParameters = expire;
-            return Task.FromResult<string>(testValue2);
+            return Task.FromResult<string?>(testValue2);
         });
 
         // keys should exist with different values
@@ -181,6 +181,31 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         });
         var foundValue = await layeredCache.GetAsync<string>(testKey);
         Assert.That(foundValue, Is.Null);
+    }
+
+    /// <summary>
+    /// Make sure we don't cache null
+    /// </summary>
+    /// <returns>Task</returns>
+    [Test]
+    public async Task TestNull()
+    {
+        int factories = 0;
+        var result = await layeredCache.GetOrCreateAsync<string>(testKey, context =>
+        {
+            factories++;
+            return Task.FromResult<string?>(null);
+        });
+        Assert.That(result, Is.Null);
+
+        result = await layeredCache.GetOrCreateAsync<string>(testKey, context =>
+        {
+            factories++;
+            return Task.FromResult<string?>(null);
+        });
+        Assert.That(result, Is.Null);
+
+        Assert.That(factories, Is.EqualTo(2));
     }
 
     /// <summary>

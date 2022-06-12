@@ -269,6 +269,10 @@ Simple cache uses a `ClockHandler` class that implements the `ISystemClock` and 
 
 You can inject your own implementation for these interfaces if you have a different needs, for example tests.
 
+## Exceptions and null
+
+Simple cache does not cache exceptions and does not cache null. If you must cache these types of objects, please wrap them in an object that can go in the cache.
+
 ---
 
 Thanks for reading!

@@ -14,8 +14,8 @@ public interface ILayeredCache : IDisposable
 	/// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.<br/>
 	/// Inside your factory, you should set the CacheParameters on the GetOrCreateAsyncContext to a duration and size tuple: (TimeSpan duration, int size)</param>
 	/// <param name="cancelToken">Cancel token</param>
-	/// <returns>Task of return of type T</returns>
-	Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default);
+	/// <returns>Task of return of type T, can have a null value if the get or create returned null</returns>
+	Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to retrieve value of T by key.
@@ -62,7 +62,7 @@ public sealed class NullLayeredCache : ILayeredCache
 	public Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default) => Task.FromResult<T?>(default);
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default) =>
+	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default) =>
 		factory(new GetOrCreateAsyncContext(key, cancelToken));
 
 	/// <inheritdoc />
@@ -81,7 +81,7 @@ public sealed class LayeredCacheOptions
 }
 
 /// <inheritdoc />
-public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDisposable
+public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 {
 	private static readonly TimeSpan defaultCacheTime = TimeSpan.FromMinutes(5.0);
 
@@ -90,8 +90,9 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
 	private readonly IDistributedCache distributedCache;
+	private readonly ISystemClock clock;
 	private readonly ILogger logger;
-	private readonly AsyncPolicyWrap cachePolicy;
+	private readonly IAsyncRequestCollapserPolicy cachePolicy;
 	private readonly AsyncPolicy distributedCacheCircuitBreakPolicy;
 
 	/// <summary>
@@ -102,12 +103,14 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	/// <param name="memoryCache">Memory cache</param>
 	/// <param name="fileCache">File cache. Can pass NullFileCache to skip file caching layer. Recommend to use SSD only for this.</param>
 	/// <param name="distributedCache">Distributed cache</param>
+	/// <param name="clock">System clock</param>
 	/// <param name="logger">Logger</param>
 	public LayeredCache(LayeredCacheOptions options,
 		ISerializer serializer,
 		IMemoryCache memoryCache,
 		IFileCache fileCache,
 		IDistributedCache distributedCache,
+		ISystemClock clock,
 		ILogger<LayeredCache> logger)
 	{
 		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";
@@ -115,13 +118,13 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 		this.memoryCache = memoryCache;
 		this.fileCache = fileCache;
 		this.distributedCache = distributedCache;
+		this.clock = clock;
 		this.logger = logger;
 
 		// create collapser, this will ensure keys do not cache storm
-		var collapser = AsyncRequestCollapserPolicy.Create(this);
 
 		// wrap this class (the cache policy) behind the collapser policy
-		this.cachePolicy = PolicyWrap.WrapAsync(collapser, this);
+		this.cachePolicy = AsyncRequestCollapserPolicy.Create(this);
 
 		// circuit break if distributed cache goes down, re-enable circuit attempts after 5 seconds
 		distributedCacheCircuitBreakPolicy = Policy.Handle<Exception>().CircuitBreakerAsync(5, TimeSpan.FromSeconds(5.0));
@@ -243,110 +246,157 @@ public sealed class LayeredCache : AsyncPolicy, ILayeredCache, IKeyStrategy, IDi
 	}
 
 	/// <inheritdoc />
-	public Task<T> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T>> factory, CancellationToken cancelToken = default)
+	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default)
 	{
+		logger.LogDebug("Layered cache get or create {key}", key);
+
 		ValidateType<T>();
 
 		key = FormatKey<T>(key);
 
-		var ctx = new GetOrCreateAsyncContext(key, cancelToken); 
-		var pollyContext = new Context(key, new Dictionary<string, object> { { "Context", ctx } });
-		return cachePolicy.ExecuteAsync((pollyContext, cancelToken) => factory(ctx), pollyContext, cancelToken);
-	}
+		var pollyContext = new Context(key);
 
-	/// <summary>
-	/// The polly policy implementation to GetOrCreateAsync a cache item
-	/// </summary>
-	/// <typeparam name="T">Type of object</typeparam>
-	/// <param name="factory">Factory method</param>
-	/// <param name="context">Context</param>
-	/// <param name="cancellationToken">Cancel token</param>
-	/// <param name="continueOnCapturedContext">Whether to continue on captured context</param>
-	/// <returns>Task of return value of T</returns>
-	protected override Task<T> ImplementationAsync<T>(Func<Context, CancellationToken, Task<T>> factory,
-		Context context,
-		CancellationToken cancellationToken,
-		bool continueOnCapturedContext)
-	{
-		// get the cache key
-		string key = context.OperationKey;
-		var getOrCreateContext = context["Context"] as GetOrCreateAsyncContext ??
-			throw new ArgumentException("Context was not passed to polly correctly");
-		logger.LogDebug("Layered cache get or create {key}", key);
-
-		return memoryCache.GetOrCreateAsync<T>(key, async entry =>
+		// collapse with polly to prevent duplicate callers for the same key
+		var outterLazy = cachePolicy.ExecuteAsync<Lazy<Task<T?>>>(async (pollyContext, cancelToken) =>
 		{
-			logger.LogDebug("Memory cache get or create miss {key}", key);
-
-			// check file cache (L2)
-			var fileItem = await fileCache.GetAsync<T>(key, cancellationToken);
-			if (fileItem is not null)
+			// fast path, check memory cache first
+			var fastPath = memoryCache.Get<T>(key);
+			if (fastPath is not null)
 			{
-				// set the size and expiration
-				entry.Size = fileItem.Size * 2;
-				entry.AbsoluteExpiration = fileItem.Expires;
-				return fileItem.Item;
+				logger.LogDebug("Layered cache get or create {key} fast path hit", key);
+				return new Lazy<Task<T?>>(Task.FromResult<T?>(fastPath));
 			}
 
-			try
-			{
-				// attempt to grab from distributed cache (L3)
-				DistributedCacheItem distributedCacheItem = await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.GetAsync(key, cancellationToken));
-				if (distributedCacheItem.HasValue)
-				{
-					logger.LogDebug("Get or create {key} in distributed cache", key);
+			// not in the memory cache, slow path...
+			var getOrCreateContext = new GetOrCreateAsyncContext(key, cancelToken);
 
-					// grabbed from distributed cache, use that value and don't invoke the factory
-					var result = DeserializeObject<T>(distributedCacheItem.Bytes);
-					if (result is null)
+			// factory method that gets the item from other caches, or creates the item if needed
+			async Task<T?> innerFactory()
+			{
+				logger.LogDebug("Memory cache get or create miss {key}", key);
+
+				try
+				{
+					// check file cache (L2)
+					var fileItem = await fileCache.GetAsync<T>(key, cancelToken);
+					if (fileItem is not null)
 					{
-						throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
+						// set the size and expiration
+						getOrCreateContext.Size = fileItem.Size * 2;
+						getOrCreateContext.Duration = fileItem.Expires - clock.UtcNow;
+						return fileItem.Item;
 					}
-					entry.Size = distributedCacheItem.Bytes.Length * 2;
-					entry.AbsoluteExpirationRelativeToNow = distributedCacheItem.Expiry;
-					return result;
 				}
-			}
-			catch (Exception ex)
-			{
-				// eat error but log it, we don't want serializer or redis to fail the entire call
-				var method = nameof(GetOrCreateAsync);
-				var type = typeof(T).FullName ?? string.Empty;
-				logger.LogError(ex, "Distributed cache read error on {method}, {key}, {type}", method, key, type);
-			}
-
-			// get the item from the factory
-			var item = await factory(context, cancellationToken);
-			entry.Size = getOrCreateContext.CacheParameters.Size;
-			entry.AbsoluteExpirationRelativeToNow = getOrCreateContext.CacheParameters.Duration;
-			var distributedCacheBytes = SerializeObject(item);
-
-			// L2 cache (file)
-			// file cache can take raw bytes and will not additional serialization on them
-			await fileCache.SetAsync(key, distributedCacheBytes, getOrCreateContext.CacheParameters.Duration);
-
-			// L3 cache (redis)
-			try
-			{
-				await distributedCacheCircuitBreakPolicy.ExecuteAsync(() =>
+				catch (Exception ex)
 				{
-					return distributedCache.SetAsync(key, new DistributedCacheItem
+					// eat error but log it, we don't want serializer or disk error to fail the entire call
+					var method = nameof(GetOrCreateAsync);
+					var type = typeof(T).FullName ?? string.Empty;
+					logger.LogError(ex, "File cache read error on {method}, {key}, {type}", method, key, type);
+				}
+
+				try
+				{
+					// check distributed cache (L3)
+					DistributedCacheItem distributedCacheItem = await distributedCacheCircuitBreakPolicy.ExecuteAsync(() => distributedCache.GetAsync(key, cancelToken));
+					if (distributedCacheItem.HasValue)
 					{
-						Bytes = distributedCacheBytes,
-						Expiry = getOrCreateContext.CacheParameters.Duration
-					});
-				});
-			}
-			catch (Exception ex)
-			{
-				// don't fail the call, we can stomach file or redis cache being down
-				var method = nameof(GetOrCreateAsync);
-				var type = typeof(T).FullName ?? string.Empty;
-				logger.LogError(ex, "Distributed cache write error on {method}, {key}, {type}", method, key, type);
+						logger.LogDebug("Get or create {key} in distributed cache", key);
+
+						// grabbed from distributed cache, use that value and don't invoke the factory
+						var result = DeserializeObject<T>(distributedCacheItem.Bytes);
+						if (result is null)
+						{
+							throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
+						}
+						getOrCreateContext.Size = distributedCacheItem.Bytes.Length * 2;
+						getOrCreateContext.Duration = distributedCacheItem.Expiry ?? CacheParameters.DefaultDuration;
+						return result;
+					}
+				}
+				catch (Exception ex)
+				{
+					// eat error but log it, we don't want serializer or redis to fail the entire call
+					var method = nameof(GetOrCreateAsync);
+					var type = typeof(T).FullName ?? string.Empty;
+					logger.LogError(ex, "Distributed cache read error on {method}, {key}, {type}", method, key, type);
+				}
+
+				// get the item from the factory
+				return await factory(getOrCreateContext);
 			}
 
-			return item;
-		});
+			// store a memory cache entry for the lazy task so that future callers collapse on to it first
+			string lazyKey = key + "_Lazy";
+			var innerLazy = await memoryCache.GetOrCreateAsync<Lazy<Task<T?>>>(lazyKey, cacheEntry =>
+			{
+				// estimate of state and reference objects captured in inner factory
+				cacheEntry.Size = 256;
+				cacheEntry.AbsoluteExpirationRelativeToNow = defaultCacheTime;
+				var lazyEntry = new Lazy<Task<T?>>(async () =>
+				{
+					try
+					{
+						var result = await innerFactory();
+						if (result is null)
+						{
+							// no item found, do not set in any caches
+							return default;
+						}
+
+						// L1 cache (RAM)
+						memoryCache.Set(key, result, new MemoryCacheEntryOptions
+						{
+							Size = getOrCreateContext.Size,
+							AbsoluteExpirationRelativeToNow = getOrCreateContext.Duration
+						});
+
+						// a serialization error here is a problem
+						var distributedCacheBytes = SerializeObject(result);
+						try
+						{
+							// L2 cache (file)
+							// file cache can take raw bytes and will not additional serialization on them
+							await fileCache.SetAsync(key, distributedCacheBytes, getOrCreateContext.CacheParameters.Duration, cancelToken);
+
+							// L3 cache (redis)
+							await distributedCacheCircuitBreakPolicy.ExecuteAsync(() =>
+							{
+								return distributedCache.SetAsync(key, new DistributedCacheItem
+								{
+									Bytes = distributedCacheBytes,
+									Expiry = getOrCreateContext.CacheParameters.Duration
+								});
+							});
+						}
+						catch (Exception ex)
+						{
+							// don't fail the call, we can stomach file or redis cache being down
+							var method = nameof(GetOrCreateAsync);
+							var type = typeof(T).FullName ?? string.Empty;
+							logger.LogError(ex, "Distributed cache write error on {method}, {key}, {type}", method, key, type);
+						}
+
+						return result;
+					}
+					catch (Exception ex)
+					{
+						string type = typeof(T).FullName ?? string.Empty;
+						logger.LogError(ex, "Error executing factory or serializer for type {type}", type);
+						await DeleteAsync<T>(key, cancelToken);
+						throw;
+					}
+					finally
+					{
+						// all done, get the lazy key out of there
+						memoryCache.Remove(lazyKey);
+					}
+				});
+				return Task.FromResult<Lazy<Task<T?>>>(lazyEntry);
+			});
+			return innerLazy;
+		}, pollyContext, cancelToken);
+		return outterLazy.Result.Value;
 	}
 
 	private void DistributedCacheKeyChanged(string key)
