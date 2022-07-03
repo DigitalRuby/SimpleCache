@@ -5,8 +5,9 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<IsPackable>true</IsPackable>
-		<Version>1.0.8</Version>
+		<Version>1.0.10</Version>
 		<Title>Simple Cache</Title>
 		<Authors>jjxtra</Authors>
 		<Company>Digital Ruby, LLC</Company>
@@ -17,7 +18,7 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/DigitalRuby/SimplePubSub</RepositoryUrl>
 		<PackageTags>cache;simple;easy;ram;memory;file;disk;redis;distributed;idistributedcache;iconnectionmultiplexer;lock;distributedlock;stackexchange;stackoverflow;connectionmultiplexer;lazy;task;storm;lazycache;caching;invalidation;expiration;synchronization;powerful;layer;layers;layered;layeredcache</PackageTags>
-		<PackageReleaseNotes>Piggy back on lazy to greatly reduce the lock time when there is a cache miss and many callers on a key</PackageReleaseNotes>
+		<PackageReleaseNotes>Allow cache primitive</PackageReleaseNotes>
 		<AssemblyVersion></AssemblyVersion>
 		<FileVersion></FileVersion>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -449,10 +449,6 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		{
 			throw new InvalidOperationException("Interfaces cannot be cached");
 		}
-		else if (t.IsPrimitive)
-		{
-			throw new InvalidOperationException("Primitives cannot be cached");
-		}
 	}
 }
 

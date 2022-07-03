@@ -139,6 +139,24 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     }
 
     /// <summary>
+    /// Test we can cache primitives
+    /// </summary>
+    /// <returns>Task</returns>
+    [Test]
+    public async Task TestCachePrimitive()
+    {
+        var expire = TimeSpan.FromSeconds(30.0);
+        var foundValue = await layeredCache.GetAsync<int>(testKey);
+        Assert.That(foundValue, Is.EqualTo(0));
+        await layeredCache.SetAsync(testKey, 1, expire);
+        foundValue = await layeredCache.GetAsync<int>(testKey);
+        Assert.That(foundValue, Is.EqualTo(1));
+        utcNow += expire;
+        foundValue = await layeredCache.GetAsync<int>(testKey);
+        Assert.That(foundValue, Is.EqualTo(0));
+    }
+
+    /// <summary>
     /// Test that memory cache compacts
     /// </summary>
     [Test]
