@@ -3,7 +3,7 @@
 /// <summary>
 /// Allows mocking current date/time and delays
 /// </summary>
-public interface IClockHandler : ISystemClock
+public interface IClockHandler : Microsoft.Extensions.Internal.ISystemClock
 {
 	/// <summary>
 	/// Delay for a set amount of time

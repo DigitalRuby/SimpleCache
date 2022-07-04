@@ -99,9 +99,13 @@ public sealed class NullDistributedCache : IDistributedCache, IDistributedLockFa
 /// </summary>
 public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLockFactory
 {
-	private readonly ISystemClock clock;
+	private readonly Microsoft.Extensions.Internal.ISystemClock clock;
 
-	public DistributedMemoryCache(ISystemClock clock) => this.clock = clock;
+	/// <summary>
+	/// Constructor
+	/// </summary>
+	/// <param name="clock">Clock</param>
+	public DistributedMemoryCache(Microsoft.Extensions.Internal.ISystemClock clock) => this.clock = clock;
 
 	internal sealed class FakeDistributedLock : IAsyncDisposable
     {

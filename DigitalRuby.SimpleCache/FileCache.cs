@@ -98,7 +98,6 @@ public interface IFileCache
 	/// <summary>
 	/// Set a cache value, overwriting any existing value
 	/// </summary>
-	/// <typeparam name="T">Type of object to set</typeparam>
 	/// <param name="key">Key</param>
 	/// <param name="value">Value. If the value is a byte array, it will not be serialized but will instead
 	/// be assumed to have already been serialized.</param>
@@ -111,7 +110,6 @@ public interface IFileCache
 	/// <summary>
 	/// Remove an item from the cache
 	/// </summary>
-	/// <typeparam name="T">Type of object to remove</typeparam>
 	/// <param name="key">Key</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task</returns>
@@ -164,10 +162,15 @@ public sealed class NullFileCache : IFileCache
 public sealed class MemoryFileCache : IFileCache
 {
 	private readonly ISerializer serializer;
-	private readonly ISystemClock clock;
+	private readonly Microsoft.Extensions.Internal.ISystemClock clock;
 	private readonly ConcurrentDictionary<string, FileCacheItem<byte[]>> items = new();
 
-	public MemoryFileCache(ISerializer serializer, ISystemClock clock)
+	/// <summary>
+	/// Constructor
+	/// </summary>
+	/// <param name="serializer">Serializer</param>
+	/// <param name="clock">Clock</param>
+	public MemoryFileCache(ISerializer serializer, Microsoft.Extensions.Internal.ISystemClock clock)
 	{
 		this.serializer = serializer;
 		this.clock = clock;

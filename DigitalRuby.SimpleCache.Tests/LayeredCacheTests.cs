@@ -4,7 +4,7 @@
 /// Tests for layered cache
 /// </summary>
 [TestFixture]
-public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<MemoryCacheOptions>, ISystemClock
+public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<MemoryCacheOptions>, Microsoft.Extensions.Internal.ISystemClock
 {
     /// <summary>
     /// Setup
@@ -16,7 +16,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         memoryCache = new(this);
         freeSpace = 10000;
         totalSpace = 100000;
-        utcNow = new DateTimeOffset(2022, 1, 1, 1, 1, 1, TimeSpan.Zero);
+        UtcNow = new DateTimeOffset(2022, 1, 1, 1, 1, 1, TimeSpan.Zero);
         fileCache = new MemoryFileCache(serializer, this);
         distributedCache = new DistributedMemoryCache(this);
         layeredCache = new LayeredCache(new LayeredCacheOptions { KeyPrefix = "test" }, serializer,
@@ -90,7 +90,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         Assert.That(foundValue, Is.EqualTo(testValue2));
 
         // get or create values should expire properly
-        utcNow += expire;
+        UtcNow += expire;
         foundValue = await layeredCache.GetAsync<string>(testKey);
         Assert.That(foundValue, Is.Null);
         foundValue = await layeredCache.GetAsync<string>(testKey2);
@@ -131,7 +131,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.SetAsync(testKey, testValue, expire);
 
         // values created by set async should expire out
-        utcNow += expire;
+        UtcNow += expire;
 
         // key should no longer exist
         foundValue = await layeredCache.GetAsync<string>(testKey);
@@ -151,7 +151,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.SetAsync(testKey, 1, expire);
         foundValue = await layeredCache.GetAsync<int>(testKey);
         Assert.That(foundValue, Is.EqualTo(1));
-        utcNow += expire;
+        UtcNow += expire;
         foundValue = await layeredCache.GetAsync<int>(testKey);
         Assert.That(foundValue, Is.EqualTo(0));
     }
@@ -221,9 +221,11 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
             factories++;
             return Task.FromResult<string?>(null);
         });
-        Assert.That(result, Is.Null);
-
-        Assert.That(factories, Is.EqualTo(2));
+        Assert.Multiple(() =>
+        {
+            Assert.That(result, Is.Null);
+            Assert.That(factories, Is.EqualTo(2));
+        });
     }
 
     /// <summary>
@@ -257,15 +259,15 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     private const string testValue2= "testvalue2";
     private static readonly TimeSpan expire = TimeSpan.FromSeconds(30.0);
 
-    private ISerializer serializer = new JsonSerializer();
-    private Dictionary<string, long> fileSpaces = new();
+    private readonly ISerializer serializer = new JsonSerializer();
+    private readonly Dictionary<string, long> fileSpaces = new();
+    
     private MemoryCache memoryCache;
     private MemoryFileCache fileCache;
     private DistributedMemoryCache distributedCache;
     private LayeredCache layeredCache;
     private long freeSpace;
     private long totalSpace;
-    private DateTimeOffset utcNow;
 
     MemoryCacheOptions IOptions<MemoryCacheOptions>.Value => new()
     {
@@ -274,9 +276,11 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         CompactionPercentage = 0.5,
         ExpirationScanFrequency = TimeSpan.FromMilliseconds(1.0)
     };
+    
+    /// <inheritdoc />
+    public DateTimeOffset UtcNow { get; set; }
 
-    DateTimeOffset ISystemClock.UtcNow => utcNow;
-
+    /// <inheritdoc />
     Task IClockHandler.DelayAsync(System.TimeSpan interval, System.Threading.CancellationToken cancelToken) => Task.Delay(0, cancelToken);
 
     long IDiskSpace.GetFileSize(string fileName)

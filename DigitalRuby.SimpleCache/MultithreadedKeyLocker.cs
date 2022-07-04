@@ -37,7 +37,6 @@ public sealed class MultithreadedKeyLocker
 	/// Acquire a lock on a key
 	/// </summary>
 	/// <param name="key">Key</param>
-	/// <param name="keyLocks"></param>
 	/// <returns>Disposable to release the lock</returns>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal IDisposable Lock(string key)

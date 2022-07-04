@@ -7,7 +7,7 @@
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<IsPackable>true</IsPackable>
-		<Version>1.0.10</Version>
+		<Version>1.0.11</Version>
 		<Title>Simple Cache</Title>
 		<Authors>jjxtra</Authors>
 		<Company>Digital Ruby, LLC</Company>
@@ -18,7 +18,7 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/DigitalRuby/SimplePubSub</RepositoryUrl>
 		<PackageTags>cache;simple;easy;ram;memory;file;disk;redis;distributed;idistributedcache;iconnectionmultiplexer;lock;distributedlock;stackexchange;stackoverflow;connectionmultiplexer;lazy;task;storm;lazycache;caching;invalidation;expiration;synchronization;powerful;layer;layers;layered;layeredcache</PackageTags>
-		<PackageReleaseNotes>Allow cache primitive</PackageReleaseNotes>
+		<PackageReleaseNotes>Minor code cleanup, fix some weirdness with ISystemClock</PackageReleaseNotes>
 		<AssemblyVersion></AssemblyVersion>
 		<FileVersion></FileVersion>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -38,7 +38,7 @@
 	<ItemGroup>
 		<PackageReference Include="K4os.Compression.LZ4.Streams" Version="1.2.16" />
 		<PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="6.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="6.0.5" />
+		<PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="6.0.6" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.1" />

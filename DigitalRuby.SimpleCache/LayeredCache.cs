@@ -90,7 +90,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
 	private readonly IDistributedCache distributedCache;
-	private readonly ISystemClock clock;
+	private readonly Microsoft.Extensions.Internal.ISystemClock clock;
 	private readonly ILogger logger;
 	private readonly IAsyncRequestCollapserPolicy cachePolicy;
 	private readonly AsyncPolicy distributedCacheCircuitBreakPolicy;
@@ -110,7 +110,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		IMemoryCache memoryCache,
 		IFileCache fileCache,
 		IDistributedCache distributedCache,
-		ISystemClock clock,
+		Microsoft.Extensions.Internal.ISystemClock clock,
 		ILogger<LayeredCache> logger)
 	{
 		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";

@@ -5,10 +5,8 @@ namespace DigitalRuby.SimpleCache.Tests;
 /// </summary>
 public sealed class FileCacheTests : IClockHandler, IDiskSpace
 {
-	private DateTimeOffset utcNow;
-
 	/// <inheritdoc />
-	DateTimeOffset ISystemClock.UtcNow => utcNow;
+	public DateTimeOffset UtcNow { get; set; }
 
 	/// <inheritdoc />
 	Task IClockHandler.DelayAsync(TimeSpan interval, CancellationToken cancelToken)
@@ -42,7 +40,7 @@ public sealed class FileCacheTests : IClockHandler, IDiskSpace
 		const int testCount = 10;
 		const string data = "74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F74956375-DD97-4857-816E-188BC8D4090F";
 
-		utcNow = new DateTimeOffset(2022, 1, 1, 1, 1, 1, TimeSpan.Zero);
+		UtcNow = new DateTimeOffset(2022, 1, 1, 1, 1, 1, TimeSpan.Zero);
 		using FileCache fileCache = new(new() { FreeSpaceThreshold = 20 }, new JsonLZ4Serializer(), this, this, new NullLogger<FileCache>());
 
 		var item = await fileCache.GetAsync<string>("key1");
@@ -54,7 +52,7 @@ public sealed class FileCacheTests : IClockHandler, IDiskSpace
 		Assert.That(item.Item, Is.EqualTo(data));
 
 		// step time, item should expire out
-		utcNow += TimeSpan.FromSeconds(6.0);
+		UtcNow += TimeSpan.FromSeconds(6.0);
 		await fileCache.CleanupFreeSpaceAsync();
 		item = await fileCache.GetAsync<string>("key1");
 		Assert.That(item, Is.Null);
@@ -102,7 +100,7 @@ public sealed class FileCacheTests : IClockHandler, IDiskSpace
 		sw.Restart();
 
 		// step time, item should expire out
-		utcNow += TimeSpan.FromSeconds(6.0);
+		UtcNow += TimeSpan.FromSeconds(6.0);
 
 		for (int i = 0; i < testCount; i++)
 		{

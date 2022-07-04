@@ -107,7 +107,7 @@ public static class ServicesExtensions
         // add our own system clock
         services.AddSingleton<ClockHandler>();
         services.AddSingleton<IClockHandler>(provider => provider.GetRequiredService<ClockHandler>());
-        services.Replace(new ServiceDescriptor(typeof(ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
+        services.Replace(new ServiceDescriptor(typeof(Microsoft.Extensions.Internal.ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
     }
 
     private static void AddDistributedCache(IServiceCollection services,
@@ -191,7 +191,7 @@ public static class ServicesExtensions
             SizeLimit = configuration.MaxMemorySize * 1024 * 1024,
             ExpirationScanFrequency = TimeSpan.FromSeconds(10.0),
             CompactionPercentage = 0.5,
-            Clock = provider.GetRequiredService<ISystemClock>()
+            Clock = provider.GetRequiredService<Microsoft.Extensions.Internal.ISystemClock>()
         })));
         services.AddSingleton<IMemoryCache>(provider => provider.GetRequiredService<MemoryCache>());
     }
