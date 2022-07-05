@@ -146,8 +146,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		key = FormatKey<T>(key);
 
 		// L1 lookup (RAM)
-		var memoryResult = memoryCache.Get<T>(key);
-		if (memoryResult is not null)
+		if (memoryCache.TryGetValue<T>(key, out T memoryResult))
 		{
 			logger.LogDebug("Memory cache hit for {key}", key);
 			return memoryResult;
