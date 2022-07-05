@@ -260,11 +260,10 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		var outterLazy = cachePolicy.ExecuteAsync<Lazy<Task<T?>>>(async (pollyContext, cancelToken) =>
 		{
 			// fast path, check memory cache first
-			var fastPath = memoryCache.Get<T>(key);
-			if (fastPath is not null)
+			if (memoryCache.TryGetValue<T>(key, out T fastPathObj))
 			{
 				logger.LogDebug("Layered cache get or create {key} fast path hit", key);
-				return new Lazy<Task<T?>>(Task.FromResult<T?>(fastPath));
+				return new Lazy<Task<T?>>(Task.FromResult<T?>(fastPathObj));
 			}
 
 			// not in the memory cache, slow path...
