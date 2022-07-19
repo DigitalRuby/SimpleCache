@@ -212,7 +212,7 @@ public interface ISerializer
 
 ## Layers
 
-Simple cache uses layers, just like a modern CPU. Modern CPU's have moultiple layers of cache just like simple cache.
+Simple cache uses layers, just like a modern CPU. Modern CPU's have multiple layers of cache just like simple cache.
 
 Using multiple layers allows ever increasing amounts of data to be stored at slightly slower retrieval times.
 
