@@ -88,7 +88,7 @@ public sealed class NullDistributedCache : IDistributedCache, IDistributedLockFa
     }
 
 	/// <inheritdoc />
-	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default)
+	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout, CancellationToken cancelToken)
     {
 		return Task.FromResult<IAsyncDisposable?>(new DistributedMemoryCache.FakeDistributedLock());
     }
@@ -152,7 +152,7 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
     }
 
 	/// <inheritdoc />
-	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default)
+	public Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout, CancellationToken cancelToken)
     {
 		if (items.TryAdd(key, new()))
 		{
@@ -167,6 +167,8 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 /// </summary>
 public sealed class DistributedRedisCache : BackgroundService, IDistributedCache, IDistributedLockFactory
 {
+	private static readonly TimeSpan oneMinute = TimeSpan.FromMinutes(1.0);
+    
 	private readonly IConnectionMultiplexer connectionMultiplexer;
 	private readonly string keyPrefix;
 	private readonly ILogger<DistributedRedisCache> logger;
@@ -324,13 +326,14 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 	private static readonly TimeSpan distributedLockSleepTime = TimeSpan.FromMilliseconds(100.0);
 
 	/// <inheritdoc />
-	public async Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default)
+	public async Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout, CancellationToken cancelToken)
 	{
 		var db = connectionMultiplexer.GetDatabase();
 		Stopwatch timer = Stopwatch.StartNew();
 		string lockKey = "DistributedLock_" + key;
 		string lockToken = Guid.NewGuid().ToString("N");
-
+		lockTime = lockTime.Ticks == 0 ? oneMinute : lockTime;
+        
 		do
 		{
 			if (await db.LockTakeAsync(lockKey, lockToken, lockTime))
@@ -340,10 +343,10 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 			}
 			if (timeout > distributedLockSleepTime)
 			{
-				await Task.Delay(distributedLockSleepTime);
+				await Task.Delay(distributedLockSleepTime, cancelToken);
 			}
 		}
-		while (timer.Elapsed < timeout);
+		while (!cancelToken.IsCancellationRequested && timer.Elapsed < timeout);
 
 		return null;
 	}
@@ -383,8 +386,9 @@ public interface IDistributedLockFactory
 	/// Attempt to acquire a distributed lock
 	/// </summary>
 	/// <param name="key">Lock key</param>
-	/// <param name="lockTime">Duration to hold the lock before it auto-expires. Set this to the maximum possible duration you think your code might hold the lock.</param>
+	/// <param name="lockTime">Duration to hold the lock before it auto-expires. Set this to the maximum possible duration you think your code might hold the lock. Default is 1 minute.</param>
 	/// <param name="timeout">Time out to acquire the lock or default to only make one attempt to acquire the lock</param>
+	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>The lock or null if the lock could not be acquired</returns>
-	Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime, TimeSpan timeout = default);
+	Task<IAsyncDisposable?> TryAcquireLockAsync(string key, TimeSpan lockTime = default, TimeSpan timeout = default, CancellationToken cancelToken = default);
 }
