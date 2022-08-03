@@ -66,11 +66,13 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     public async Task TestGetOrCreate()
     {
         // add one key
+        object state = "hello";
         await layeredCache.GetOrCreateAsync<string>(testKey, context =>
         {
             context.CacheParameters = expire;
+            Assert.That(context.State, Is.EqualTo("hello"));
             return Task.FromResult<string?>(testValue);
-        });
+        }, state);
         var foundValue = await layeredCache.GetAsync<string>(testKey);
         Assert.That(foundValue, Is.EqualTo(testValue));
 
@@ -78,6 +80,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.GetOrCreateAsync<string>(testKey2, context =>
         {
             context.CacheParameters = expire;
+            Assert.That(context.State, Is.Null);
             return Task.FromResult<string?>(testValue2);
         });
 

@@ -13,9 +13,11 @@ public interface ILayeredCache : IDisposable
 	/// <param name="key">Cache key</param>
 	/// <param name="factory">Factory method to create the item if no item is in the cache for the key. This factory is guaranteed to execute only one per key.<br/>
 	/// Inside your factory, you should set the CacheParameters on the GetOrCreateAsyncContext to a duration and size tuple: (TimeSpan duration, int size)</param>
+	/// <param name="state">Object to set on the get or create context to avoid capturing variables</param>
 	/// <param name="cancelToken">Cancel token</param>
 	/// <returns>Task of return of type T, can have a null value if the get or create returned null</returns>
-	Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default);
+	Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory,
+		object? state = null, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Attempts to retrieve value of T by key.
@@ -62,8 +64,9 @@ public sealed class NullLayeredCache : ILayeredCache
 	public Task<T?> GetAsync<T>(string key, CancellationToken cancelToken = default) => Task.FromResult<T?>(default);
 
 	/// <inheritdoc />
-	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default) =>
-		factory(new GetOrCreateAsyncContext(key, cancelToken));
+	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory,
+		object? state = null, CancellationToken cancelToken = default) =>
+		factory(new GetOrCreateAsyncContext(key, state, cancelToken));
 
 	/// <inheritdoc />
 	public Task SetAsync<T>(string key, T obj, CacheParameters cacheParam, CancellationToken cancelToken = default) => Task.CompletedTask;
@@ -245,7 +248,8 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 	}
 
 	/// <inheritdoc />
-	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory, CancellationToken cancelToken = default)
+	public Task<T?> GetOrCreateAsync<T>(string key, Func<GetOrCreateAsyncContext, Task<T?>> factory,
+		object? state = null, CancellationToken cancelToken = default)
 	{
 		logger.LogDebug("Layered cache get or create {key}", key);
 
@@ -266,7 +270,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 			}
 
 			// not in the memory cache, slow path...
-			var getOrCreateContext = new GetOrCreateAsyncContext(key, cancelToken);
+			var getOrCreateContext = new GetOrCreateAsyncContext(key, state, cancelToken);
 
 			// factory method that gets the item from other caches, or creates the item if needed
 			async Task<T?> innerFactory()
@@ -459,10 +463,12 @@ public class GetOrCreateAsyncContext
 	/// Constructor
 	/// </summary>
 	/// <param name="key">Key</param>
+	/// <param name="state">State</param>
 	/// <param name="cancelToken">Cancel token</param>
-	public GetOrCreateAsyncContext(string key, CancellationToken cancelToken)
+	public GetOrCreateAsyncContext(string key, object? state, CancellationToken cancelToken)
 	{
 		Key = key;
+		State = state;
 		CancelToken = cancelToken;
 	}
 
@@ -470,6 +476,11 @@ public class GetOrCreateAsyncContext
 	/// Cache key
 	/// </summary>
 	public string Key { get; }
+
+	/// <summary>
+	/// State
+	/// </summary>
+	public object? State { get; }
 
 	/// <summary>
 	/// Cache parameters. You can set these to a new value for duration and size inside the factory method
