@@ -13,6 +13,7 @@ SimpleCache removes the headache and pain of getting caching right in .NET.
 - Optimized usage of all your resources. Simple cache has three layers to give you maximum performance: RAM, disk and redis.
 - Built in json-lz4 serializer for file and redis caching for smaller values and minimal implementation pain.
 - You can create your own serializer if you want to use protobuf or other compression options.
+- Redis key remove/change/add notifications to keep all your servers in sync.
 
 ## Setup and Configuration
 
