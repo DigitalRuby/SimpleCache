@@ -129,6 +129,9 @@ public interface ILayeredCache : IDisposable
 }
 ```
 
+**IMPORTANT**  
+Do not recursively call cache methods. A cache call should not make other caching calls inside of the factory method.
+
 Your cache key will be modified by the type parameter, `<T>`. This means you can have duplicate `key` parameters for different types.
 
 Cache keys are also prefixed by the entry assembly name by default. This can be changed in the configuration.
