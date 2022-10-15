@@ -59,9 +59,6 @@ public struct CacheParameters
 		}
 	}
 
-	// allow jittering cache in a thread-safe way
-	private static readonly ThreadLocal<Random> jitter = new(() => new Random());
-
 	/// <summary>
 	/// Wiggle the cache duration slightly to avoid having multiple cache items expire all at once
 	/// </summary>
@@ -99,7 +96,7 @@ public struct CacheParameters
 			upperJitter = 1.025;
 		}
 
-		double randomDouble = jitter.Value!.NextDouble();
+		double randomDouble = Random.Shared.NextDouble();
 		double multiplier = 1.0 + (randomDouble * upperJitter);
 		long jitteredTicks = (long)(Duration.Ticks * multiplier);
 		Duration = TimeSpan.FromTicks(jitteredTicks);
