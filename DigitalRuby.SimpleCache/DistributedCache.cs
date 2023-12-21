@@ -283,12 +283,13 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 			var namespaceForSubscribe = $"{keyspace}{keyPrefix}*";
 			var namespaceForSubscribeFlushAll = $"{keyspace}__flushall__*";
 			queue = connectionMultiplexer.GetSubscriber();
-			queue.Subscribe(namespaceForSubscribe, (channel, value) =>
+#pragma warning disable CS0618 // Type or member is obsolete
+            queue.Subscribe(namespaceForSubscribe, (channel, value) =>
 			{
 				string key = channel.ToString()[keyspace.Length..];
 				KeyChanged?.Invoke(key);
 			});
-			queue.Subscribe(namespaceForSubscribeFlushAll, (channel, value) =>
+            queue.Subscribe(namespaceForSubscribeFlushAll, (channel, value) =>
 			{
 				if (value == "set")
 				{
@@ -296,7 +297,8 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 					KeyChanged?.Invoke(key);
 				}
 			});
-			changeQueue = queue;
+#pragma warning restore CS0618 // Type or member is obsolete
+            changeQueue = queue;
 		}
 		catch (Exception ex)
 		{

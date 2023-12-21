@@ -149,7 +149,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		key = FormatKey<T>(key);
 
 		// L1 lookup (RAM)
-		if (memoryCache.TryGetValue<T>(key, out T memoryResult))
+		if (memoryCache.TryGetValue<T>(key, out var memoryResult))
 		{
 			logger.LogDebug("Memory cache hit for {key}", key);
 			return memoryResult;
@@ -263,7 +263,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		var outterLazy = cachePolicy.ExecuteAsync<Lazy<Task<T?>>>(async (pollyContext, cancelToken) =>
 		{
 			// fast path, check memory cache first
-			if (memoryCache.TryGetValue<T>(key, out T fastPathObj))
+			if (memoryCache.TryGetValue<T>(key, out var fastPathObj))
 			{
 				logger.LogDebug("Layered cache get or create {key} fast path hit", key);
 				return new Lazy<Task<T?>>(Task.FromResult<T?>(fastPathObj));
@@ -396,7 +396,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 				});
 				return Task.FromResult<Lazy<Task<T?>>>(lazyEntry);
 			});
-			return innerLazy;
+			return innerLazy!;
 		}, pollyContext, cancelToken);
 		return outterLazy.Result.Value;
 	}
