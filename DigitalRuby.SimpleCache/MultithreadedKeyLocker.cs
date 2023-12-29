@@ -3,42 +3,31 @@
 /// <summary>
 /// Allows locking on keys in a more thread friendly manner than just lock keyword
 /// </summary>
-public sealed class MultithreadedKeyLocker
+/// <remarks>
+/// Constructor
+/// </remarks>
+/// <param name="size">Size of key locks, default of 512 is usually good enough</param>
+public sealed class MultithreadedKeyLocker(int size = 512)
 {
-	private readonly int[] keyLocks;
+	private readonly int[] keyLocks = new int[size];
 
-	private struct KeyLockerDisposer : IDisposable
+	private readonly struct KeyLockerDisposer(int[] keyLocks, uint index) : IDisposable
 	{
-		private readonly int[] keyLocks;
-		private readonly uint index;
+		private readonly int[] keyLocks = keyLocks;
+		private readonly uint index = index;
 
-		public KeyLockerDisposer(int[] keyLocks, uint index)
-		{
-			this.keyLocks = keyLocks;
-			this.index = index;
-		}
-
-		public void Dispose()
+        public void Dispose()
 		{
 			keyLocks[index] = 0;
 		}
 	}
 
-	/// <summary>
-	/// Constructor
-	/// </summary>
-	/// <param name="size">Size of key locks, default of 512 is usually good enough</param>
-	public MultithreadedKeyLocker(int size = 512)
-	{
-		keyLocks = new int[size];
-	}
-
-	/// <summary>
-	/// Acquire a lock on a key
-	/// </summary>
-	/// <param name="key">Key</param>
-	/// <returns>Disposable to release the lock</returns>
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// Acquire a lock on a key
+    /// </summary>
+    /// <param name="key">Key</param>
+    /// <returns>Disposable to release the lock</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
 	internal IDisposable Lock(string key)
 	{
 		// faster than lock, especially if many threads or connections are active at once

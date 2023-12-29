@@ -4,7 +4,7 @@
 /// Tests for layered cache
 /// </summary>
 [TestFixture]
-public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<MemoryCacheOptions>, Microsoft.Extensions.Internal.ISystemClock
+public sealed class LayeredCacheTests : TimeProvider, ISystemClock, IDiskSpace, IOptions<MemoryCacheOptions>
 {
     /// <summary>
     /// Setup
@@ -31,7 +31,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     public async Task TestGetOrCreatePreventsCacheStorm()
     {
         ManualResetEvent evt = new(false);
-        List<Task> tasks = new();
+        List<Task> tasks = [];
         int cacheMiss = 0;
         for (int i = 0; i < 1000; i++)
         {
@@ -154,7 +154,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
         await layeredCache.SetAsync(testKey, 1, expire);
         foundValue = await layeredCache.GetAsync<int>(testKey);
         Assert.That(foundValue, Is.EqualTo(1));
-        UtcNow += expire;
+        UtcNow += expire; // cache should clear
         foundValue = await layeredCache.GetAsync<int>(testKey);
         Assert.That(foundValue, Is.EqualTo(0));
     }
@@ -236,7 +236,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     /// </summary>
     /// <param name="handle">Wait handle</param>
     /// <returns>Task</returns>
-    private static Task AsTask(WaitHandle handle)
+    private static Task<object> AsTask(WaitHandle handle)
     {
         TaskCompletionSource<object> tcs = new();
         TimeSpan timeout = TimeSpan.FromMinutes(1.0);
@@ -263,7 +263,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     private static readonly TimeSpan expire = TimeSpan.FromSeconds(30.0);
 
     private readonly ISerializer serializer = new JsonSerializer();
-    private readonly Dictionary<string, long> fileSpaces = new();
+    private readonly Dictionary<string, long> fileSpaces = [];
     
     private MemoryCache memoryCache;
     private MemoryFileCache fileCache;
@@ -284,7 +284,7 @@ public sealed class LayeredCacheTests : IDiskSpace, IClockHandler, IOptions<Memo
     public DateTimeOffset UtcNow { get; set; }
 
     /// <inheritdoc />
-    Task IClockHandler.DelayAsync(System.TimeSpan interval, System.Threading.CancellationToken cancelToken) => Task.Delay(0, cancelToken);
+    public override DateTimeOffset GetUtcNow() => UtcNow;
 
     long IDiskSpace.GetFileSize(string fileName)
     {

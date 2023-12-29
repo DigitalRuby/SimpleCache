@@ -268,10 +268,7 @@ public interface IDistributedLockFactory
 ```
 
 ## ISystemClock
-
-Simple cache uses a `ClockHandler` class that implements the `ISystemClock` and `IClockHandler` interfaces.
-
-You can inject your own implementation for these interfaces if you have a different needs, for example tests.
+Simple cache uses TimeProvider as of version 2.0.0.
 
 ## Exceptions and null
 

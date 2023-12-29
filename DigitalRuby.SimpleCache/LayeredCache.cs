@@ -93,7 +93,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 	private readonly IMemoryCache memoryCache;
 	private readonly IFileCache fileCache;
 	private readonly IDistributedCache distributedCache;
-	private readonly Microsoft.Extensions.Internal.ISystemClock clock;
+	private readonly TimeProvider clock;
 	private readonly ILogger logger;
 	private readonly IAsyncRequestCollapserPolicy cachePolicy;
 	private readonly AsyncPolicy distributedCacheCircuitBreakPolicy;
@@ -113,7 +113,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 		IMemoryCache memoryCache,
 		IFileCache fileCache,
 		IDistributedCache distributedCache,
-		Microsoft.Extensions.Internal.ISystemClock clock,
+		TimeProvider clock,
 		ILogger<LayeredCache> logger)
 	{
 		this.keyPrefix = (options.KeyPrefix ?? string.Empty) + ":";
@@ -285,7 +285,7 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 					{
 						// set the size and expiration
 						getOrCreateContext.Size = fileItem.Size * 2;
-						getOrCreateContext.Duration = fileItem.Expires - clock.UtcNow;
+						getOrCreateContext.Duration = fileItem.Expires - clock.GetUtcNow();
 						return fileItem.Item;
 					}
 				}
@@ -306,12 +306,8 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 						logger.LogDebug("Get or create {key} in distributed cache", key);
 
 						// grabbed from distributed cache, use that value and don't invoke the factory
-						var result = DeserializeObject<T>(distributedCacheItem.Bytes);
-						if (result is null)
-						{
-							throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
-						}
-						getOrCreateContext.Size = distributedCacheItem.Bytes.Length * 2;
+						var result = DeserializeObject<T>(distributedCacheItem.Bytes) ?? throw new IOException("Failed to deserialize object of type " + typeof(T).FullName);
+                        getOrCreateContext.Size = distributedCacheItem.Bytes.Length * 2;
 						getOrCreateContext.Duration = distributedCacheItem.Expiry ?? CacheParameters.DefaultDuration;
 						return result;
 					}
@@ -457,45 +453,39 @@ public sealed class LayeredCache : ILayeredCache, IKeyStrategy, IDisposable
 /// <summary>
 /// Context for GetOrCreateAsync
 /// </summary>
-public class GetOrCreateAsyncContext
+/// <remarks>
+/// Constructor
+/// </remarks>
+/// <param name="key">Key</param>
+/// <param name="state">State</param>
+/// <param name="cancelToken">Cancel token</param>
+public class GetOrCreateAsyncContext(string key, object? state, CancellationToken cancelToken)
 {
-	/// <summary>
-	/// Constructor
-	/// </summary>
-	/// <param name="key">Key</param>
-	/// <param name="state">State</param>
-	/// <param name="cancelToken">Cancel token</param>
-	public GetOrCreateAsyncContext(string key, object? state, CancellationToken cancelToken)
-	{
-		Key = key;
-		State = state;
-		CancelToken = cancelToken;
-	}
 
-	/// <summary>
-	/// Cache key
-	/// </summary>
-	public string Key { get; }
+    /// <summary>
+    /// Cache key
+    /// </summary>
+    public string Key { get; } = key;
 
-	/// <summary>
-	/// State
-	/// </summary>
-	public object? State { get; }
+    /// <summary>
+    /// State
+    /// </summary>
+    public object? State { get; } = state;
 
-	/// <summary>
-	/// Cache parameters. You can set these to a new value for duration and size inside the factory method
-	/// </summary>
-	public CacheParameters CacheParameters { get; set; }
+    /// <summary>
+    /// Cache parameters. You can set these to a new value for duration and size inside the factory method
+    /// </summary>
+    public CacheParameters CacheParameters { get; set; }
 
-	/// <summary>
-	/// Cancellation token
-	/// </summary>
-	public CancellationToken CancelToken { get; }
+    /// <summary>
+    /// Cancellation token
+    /// </summary>
+    public CancellationToken CancelToken { get; } = cancelToken;
 
-	/// <summary>
-	/// Get/set duration on the cache parameters
-	/// </summary>
-	public TimeSpan Duration
+    /// <summary>
+    /// Get/set duration on the cache parameters
+    /// </summary>
+    public TimeSpan Duration
 	{
 		get => CacheParameters.Duration;
 		set => CacheParameters = new(value, CacheParameters.Size);

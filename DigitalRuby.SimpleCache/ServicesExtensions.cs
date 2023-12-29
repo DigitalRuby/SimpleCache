@@ -5,11 +5,9 @@
 /// </summary>
 public static class ServicesExtensions
 {
-    private sealed class MemoryOptionsProvider : IOptions<MemoryCacheOptions>
+    private sealed class MemoryOptionsProvider(MemoryCacheOptions options) : IOptions<MemoryCacheOptions>
     {
-        public MemoryOptionsProvider(MemoryCacheOptions options) => Value = options;
-
-        public MemoryCacheOptions Value { get; }
+        public MemoryCacheOptions Value { get; } = options;
     }
 
     private sealed class Resolver
@@ -63,7 +61,6 @@ public static class ServicesExtensions
     {
         SetConfigurationDefaults(configuration);
         var layerCacheOptions = AddLayerCacheOptions(services, configuration);
-        AddSystemClock(services);
         AddMemoryCache(services, configuration);
         AddFileCache(services, configuration);
         AddDistributedCache(services, configuration, layerCacheOptions);
@@ -100,14 +97,6 @@ public static class ServicesExtensions
         };
         services.AddSingleton(layerCacheOptions);
         return layerCacheOptions;
-    }
-
-    private static void AddSystemClock(IServiceCollection services)
-    {
-        // add our own system clock
-        services.AddSingleton<ClockHandler>();
-        services.AddSingleton<IClockHandler>(provider => provider.GetRequiredService<ClockHandler>());
-        services.Replace(new ServiceDescriptor(typeof(Microsoft.Extensions.Internal.ISystemClock), provider => provider.GetRequiredService<ClockHandler>(), ServiceLifetime.Singleton));
     }
 
     private static void AddDistributedCache(IServiceCollection services,

@@ -97,17 +97,15 @@ public sealed class NullDistributedCache : IDistributedCache, IDistributedLockFa
 /// <summary>
 /// Distributed cache but all in memory (for testing)
 /// </summary>
-public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLockFactory
+/// <remarks>
+/// Constructor
+/// </remarks>
+/// <param name="clock">Clock</param>
+public sealed class DistributedMemoryCache(TimeProvider clock) : IDistributedCache, IDistributedLockFactory
 {
-	private readonly Microsoft.Extensions.Internal.ISystemClock clock;
+	private readonly TimeProvider clock = clock;
 
-	/// <summary>
-	/// Constructor
-	/// </summary>
-	/// <param name="clock">Clock</param>
-	public DistributedMemoryCache(Microsoft.Extensions.Internal.ISystemClock clock) => this.clock = clock;
-
-	internal sealed class FakeDistributedLock : IAsyncDisposable
+    internal sealed class FakeDistributedLock : IAsyncDisposable
     {
         public ValueTask DisposeAsync()
         {
@@ -133,9 +131,9 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
 	/// <inheritdoc />
 	public Task<DistributedCacheItem> GetAsync(string key, CancellationToken cancelToken = default)
     {
-		if (items.TryGetValue(key, out var item) && item.Item1 > clock.UtcNow)
+		if (items.TryGetValue(key, out var item) && item.Item1 > clock.GetUtcNow())
 		{
-			return Task.FromResult(new DistributedCacheItem { Bytes = item.Item2, Expiry = item.Item1 - clock.UtcNow });
+			return Task.FromResult(new DistributedCacheItem { Bytes = item.Item2, Expiry = item.Item1 - clock.GetUtcNow() });
 		}
 		return Task.FromResult<DistributedCacheItem>(default);
     }
@@ -145,7 +143,7 @@ public sealed class DistributedMemoryCache : IDistributedCache, IDistributedLock
     {
 		if (item.Bytes is not null)
 		{
-			DateTimeOffset expire = clock.UtcNow + item.Expiry ?? throw new ArgumentException("Null expiry not allowed");
+			DateTimeOffset expire = clock.GetUtcNow() + item.Expiry ?? throw new ArgumentException("Null expiry not allowed");
 			items[key] = new(expire, item.Bytes);
 		}
 		return Task.CompletedTask;
@@ -306,20 +304,13 @@ public sealed class DistributedRedisCache : BackgroundService, IDistributedCache
 		}
 	}
 
-	private class DistributedLock : IAsyncDisposable
+	private class DistributedLock(IConnectionMultiplexer connection, string lockKey, string lockToken) : IAsyncDisposable
 	{
-		private readonly IConnectionMultiplexer connection;
-		private readonly string lockKey;
-		private readonly string lockToken;
+		private readonly IConnectionMultiplexer connection = connection;
+		private readonly string lockKey = lockKey;
+		private readonly string lockToken = lockToken;
 
-		public DistributedLock(IConnectionMultiplexer connection, string lockKey, string lockToken)
-		{
-			this.connection = connection;
-			this.lockKey = lockKey;
-			this.lockToken = lockToken;
-		}
-
-		public async ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
 		{
 			await connection.GetDatabase().LockReleaseAsync(lockKey, lockToken);
 		}
