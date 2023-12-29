@@ -180,7 +180,7 @@ public static class ServicesExtensions
             SizeLimit = configuration.MaxMemorySize * 1024 * 1024,
             ExpirationScanFrequency = TimeSpan.FromSeconds(10.0),
             CompactionPercentage = 0.5,
-            Clock = provider.GetRequiredService<Microsoft.Extensions.Internal.ISystemClock>()
+            Clock = provider.GetService<Microsoft.Extensions.Internal.ISystemClock>() ?? new SystemClock()
         })));
         services.AddSingleton<IMemoryCache>(provider => provider.GetRequiredService<MemoryCache>());
     }
