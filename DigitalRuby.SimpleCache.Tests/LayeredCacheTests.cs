@@ -24,6 +24,15 @@ public sealed class LayeredCacheTests : TimeProvider, ISystemClock, IDiskSpace, 
     }
 
     /// <summary>
+    /// Teardown
+    /// </summary>
+    [TearDown]
+    public void Teardown()
+    {
+        layeredCache?.Dispose();
+    }
+
+    /// <summary>
     /// Test GetOrCreate prevents cache storm
     /// </summary>
     /// <returns>Task</returns>

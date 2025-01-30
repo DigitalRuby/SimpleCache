@@ -81,11 +81,8 @@ public sealed class FileCacheTests : TimeProvider, IDiskSpace
 			tasks.Add(Task.Run(async () =>
 			{
 				var item2 = await fileCache.GetAsync<string>("key_" + iCopy);
-				Assert.Multiple(() =>
-				{
-					Assert.That(item2, Is.Not.Null);
-					Assert.That("key_" + iCopy + "_" + data, Is.EqualTo(item2!.Item));
-				});
+				Assert.That(item2, Is.Not.Null);
+				Assert.That("key_" + iCopy + "_" + data, Is.EqualTo(item2!.Item));
 			}));
 		}
 		await Task.WhenAll(tasks);
@@ -144,4 +141,22 @@ public sealed class FileCacheTests : TimeProvider, IDiskSpace
 		var result = await fileCache.GetAsync<string>("key");
 		Assert.That(result, Is.Null);
 	}
+
+	/// <summary>
+	/// Test file cache bytes
+	/// </summary>
+	/// <returns>Task</returns>
+	[Test]
+	public async Task TestBytes()
+	{
+        using FileCache fileCache = new(new() { FreeSpaceThreshold = 20 }, new JsonLZ4Serializer(), this, this, new NullLogger<FileCache>());
+        var bytes = new byte[999999];
+		Random.Shared.NextBytes(bytes);
+		var foundBytes = await fileCache.GetAsync<byte[]>("testbytes");
+		Assert.That(foundBytes, Is.Null);
+        await fileCache.SetAsync("testbytes", bytes, new CacheParameters(TimeSpan.FromSeconds(9999.0)));
+        var foundBytes2 = await fileCache.GetAsync<byte[]>("testbytes");
+        Assert.That(foundBytes2?.Item, Is.Not.Null);
+		Assert.That(foundBytes2!.Item, Is.EqualTo(bytes));
+    }
 }

@@ -208,6 +208,7 @@ public sealed class MemoryFileCache(ISerializer serializer, TimeProvider clock) 
 /// <inheritdoc />
 public sealed class FileCache : BackgroundService, IFileCache
 {
+	private static readonly Type byteArrayType = typeof(byte[]);
 	private static readonly TimeSpan cleanupLoopDelay = TimeSpan.FromMilliseconds(1.0);
 
 	private readonly MultithreadedKeyLocker keyLocker = new(512);
@@ -323,8 +324,16 @@ public sealed class FileCache : BackgroundService, IFileCache
 				{
 					throw new IOException("Byte counts are off for file cache item");
 				}
-				var item = (T?)Serializer.Deserialize(bytes, typeof(T?)) ?? throw new IOException("Corrupt cache file " + fileName);
-                var result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item, size);
+				FileCacheItem<T> result;
+                if (typeof(T) == byteArrayType)
+				{
+                    result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), (T)(object)bytes, size);
+                }
+				else
+				{
+					var item = (T?)Serializer.Deserialize(bytes, typeof(T?)) ?? throw new IOException("Corrupt cache file " + fileName);
+                    result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item, size);
+                }
 				logger.LogDebug("File cache hit {key}, {fileName}", key, fileName);
 				return result;
 			}
