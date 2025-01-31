@@ -80,12 +80,17 @@ public interface IFileCache
 	public ISerializer Serializer { get; }
 
 	/// <summary>
+	/// Time provider
+	/// </summary>
+	public TimeProvider Clock { get; }
+
+	/// <summary>
 	/// Get a cache value
 	/// </summary>
 	/// <typeparam name="T">Type of value</typeparam>
 	/// <param name="key">Key</param>
 	/// <param name="cancelToken">Cancel token</param>
-	/// <returns>Task of type T, T will be null if not found</returns>
+	/// <returns>Task of FileCacheItem of type T, null if not found</returns>
 	/// <exception cref="NullReferenceException">Key is null</exception>
 	Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default);
 
@@ -101,15 +106,39 @@ public interface IFileCache
 	/// <exception cref="NullReferenceException">Key is null</exception>
 	Task SetAsync(string key, object value, CacheParameters cacheParameters = default, CancellationToken cancelToken = default);
 
-	/// <summary>
-	/// Remove an item from the cache
-	/// </summary>
-	/// <param name="key">Key</param>
-	/// <param name="cancelToken">Cancel token</param>
-	/// <returns>Task</returns>
-	/// <exception cref="NullReferenceException">Key is null</exception>
-	/// <remarks>Ensure the the type parameter is the exact type that you used to add the item to the cache</remarks>
-	Task RemoveAsync(string key, CancellationToken cancelToken = default);
+    /// <summary>
+    /// Get or create a cache item if it doesn't exist
+    /// </summary>
+    /// <param name="key">Key</param>
+    /// <param name="valueFactory">Value factory</param>
+    /// <param name="cacheParameters">Cache parameters</param>
+    /// <param name="cancelToken">Cancel token</param>
+    /// <returns>Task of file cache item of type T</returns>
+    /// <exception cref="NullReferenceException">Key is null</exception>
+	async Task<FileCacheItem<T>> GetOrCreateAsync<T>(string key, Func<CancellationToken, Task<T>> valueFactory, CacheParameters cacheParameters = default, CancellationToken cancelToken = default)
+    {
+        var result = await GetAsync<T>(key, cancelToken);
+        if (result is null)
+        {
+            var value = await valueFactory(cancelToken);
+            if (value is not null && value is not Exception && value is not Task)
+            {
+                await SetAsync(key, value, cacheParameters, cancelToken);
+            }
+            result = new FileCacheItem<T>(Clock.GetUtcNow() + cacheParameters.Duration, value, cacheParameters.Size);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Remove an item from the cache
+    /// </summary>
+    /// <param name="key">Key</param>
+    /// <param name="cancelToken">Cancel token</param>
+    /// <returns>Task</returns>
+    /// <exception cref="NullReferenceException">Key is null</exception>
+    /// <remarks>Ensure the the type parameter is the exact type that you used to add the item to the cache</remarks>
+    Task RemoveAsync(string key, CancellationToken cancelToken = default);
 
 	/// <summary>
 	/// Remove all cache items
@@ -128,14 +157,19 @@ public sealed class NullFileCache : IFileCache
 	/// </summary>
 	public ISerializer Serializer { get; } = new JsonLZ4Serializer();
 
-	/// <inheritdoc />
+	/// <summary>
+	/// Clock
+	/// </summary>
+	public TimeProvider Clock { get; } = TimeProvider.System;
+
+    /// <inheritdoc />
     public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
     {
 		return Task.FromResult<FileCacheItem<T>?>(null);
     }
 
-	/// <inheritdoc />
-	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
+    /// <inheritdoc />
+    public Task RemoveAsync(string key, CancellationToken cancelToken = default)
     {
 		return Task.CompletedTask;
     }
@@ -161,11 +195,15 @@ public sealed class NullFileCache : IFileCache
 public sealed class MemoryFileCache(ISerializer serializer, TimeProvider clock) : IFileCache
 {
 	private readonly ISerializer serializer = serializer;
-	private readonly TimeProvider clock = clock;
 	private readonly ConcurrentDictionary<string, FileCacheItem<byte[]>> items = new();
 
     /// <inheritdoc />
     public ISerializer Serializer => serializer;
+
+	/// <summary>
+	/// Clock
+	/// </summary>
+	public TimeProvider Clock { get; } = TimeProvider.System;
 
 	/// <inheritdoc />
 	public Task<FileCacheItem<T>?> GetAsync<T>(string key, CancellationToken cancelToken = default)
@@ -182,8 +220,8 @@ public sealed class MemoryFileCache(ISerializer serializer, TimeProvider clock) 
 		return Task.FromResult<FileCacheItem<T>?>(null);
     }
 
-	/// <inheritdoc />
-	public Task RemoveAsync(string key, CancellationToken cancelToken = default)
+    /// <inheritdoc />
+    public Task RemoveAsync(string key, CancellationToken cancelToken = default)
     {
 		items.TryRemove(key, out _);
 		return Task.CompletedTask;
@@ -208,13 +246,17 @@ public sealed class MemoryFileCache(ISerializer serializer, TimeProvider clock) 
 /// <inheritdoc />
 public sealed class FileCache : BackgroundService, IFileCache
 {
+	/// <summary>
+	/// Clock
+	/// </summary>
+	public TimeProvider Clock { get; }
+
 	private static readonly Type byteArrayType = typeof(byte[]);
 	private static readonly TimeSpan cleanupLoopDelay = TimeSpan.FromMilliseconds(1.0);
 
 	private readonly MultithreadedKeyLocker keyLocker = new(512);
 
 	private readonly IDiskSpace diskSpace;
-	private readonly TimeProvider clock;
 	private readonly ILogger logger;
 
 	private readonly string baseDir;
@@ -256,7 +298,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 	{
 		Serializer = serializer;
 		this.diskSpace = diskSpace;
-		this.clock = clock;
+		Clock = clock;
 		this.logger = logger;
 		string assemblyName = Assembly.GetEntryAssembly()!.GetName().Name!;
 		baseDir = options.CacheDirectory;
@@ -300,7 +342,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 			using BinaryReader reader = new(readerStream);
 			long ticks = reader.ReadInt64();
 			DateTimeOffset cutOff = new(ticks, TimeSpan.Zero);
-			if (clock.GetUtcNow() >= cutOff)
+			if (Clock.GetUtcNow() >= cutOff)
 			{
 				// expired, delete, no exception for performance
 				logger.LogDebug("File cache expired {key}, {fileName}, deleting", key, fileName);
@@ -325,15 +367,15 @@ public sealed class FileCache : BackgroundService, IFileCache
 					throw new IOException("Byte counts are off for file cache item");
 				}
 				FileCacheItem<T> result;
-                if (typeof(T) == byteArrayType)
+				if (typeof(T) == byteArrayType)
 				{
-                    result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), (T)(object)bytes, size);
-                }
+					result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), (T)(object)bytes, size);
+				}
 				else
 				{
 					var item = (T?)Serializer.Deserialize(bytes, typeof(T?)) ?? throw new IOException("Corrupt cache file " + fileName);
-                    result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item, size);
-                }
+					result = new FileCacheItem<T>(new DateTimeOffset(ticks, TimeSpan.Zero), item, size);
+				}
 				logger.LogDebug("File cache hit {key}, {fileName}", key, fileName);
 				return result;
 			}
@@ -403,7 +445,7 @@ public sealed class FileCache : BackgroundService, IFileCache
 		{
 			using FileStream writerStream = new(fileName, FileMode.Create, FileAccess.Write, FileShare.None);
 			using BinaryWriter writer = new(writerStream);
-			DateTimeOffset expires = clock.GetUtcNow() + cacheParameters.Duration;
+			DateTimeOffset expires = Clock.GetUtcNow() + cacheParameters.Duration;
 			writer.Write(expires.Ticks);
 			byte[]? bytes = (value is byte[] alreadyBytes ? alreadyBytes : Serializer.Serialize(value));
 			if (bytes is not null)

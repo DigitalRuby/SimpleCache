@@ -7,7 +7,7 @@
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<IsPackable>true</IsPackable>
-		<Version>3.0.1</Version>
+		<Version>3.0.2</Version>
 		<Title>Simple Cache</Title>
 		<Authors>jjxtra</Authors>
 		<Company>Digital Ruby, LLC</Company>
