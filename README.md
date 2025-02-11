@@ -4,7 +4,7 @@ SimpleCache removes the headache and pain of getting caching right in .NET.
 
 **Features**:
 - Simple and intuitive API using generics and tasks.
-- Cache storm prevention using `GetOrCreateAsync`. Your factory is guaranteed to execute only once per key, regardless of how many callers stack on it.
+- Cache storm/stampede prevention (per machine) using `GetOrCreateAsync`. Your factory is guaranteed to execute only once per key, regardless of how many callers stack on it.
 - Exceptions are not cached.
 - Thread safe.
 - Three layers: RAM, disk and redis. Disk and redis can be disabled if desired.
